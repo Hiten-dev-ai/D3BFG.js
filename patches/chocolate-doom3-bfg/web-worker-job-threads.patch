@@ -1,0 +1,21 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1523,4 +1523,4 @@
+                     "-pthread"
+                     "-sPROXY_TO_PTHREAD=1"
+-                    "-sPTHREAD_POOL_SIZE=1"
++                    "-sPTHREAD_POOL_SIZE=8"
+                     "-sASYNCIFY=1"
+diff --git a/neo/idlib/ParallelJobList.cpp b/neo/idlib/ParallelJobList.cpp
+--- a/neo/idlib/ParallelJobList.cpp
++++ b/neo/idlib/ParallelJobList.cpp
+@@ -1174,3 +1174,7 @@
+ // DOOM3: We don't have that many jobs, so just set this fairly low so we don't spin up a ton of idle threads
+-#define MAX_JOB_THREADS 32
++#if defined(__EMSCRIPTEN_PTHREADS__)
++#define MAX_JOB_THREADS 4
++#else
++#define MAX_JOB_THREADS 32
++#endif
+ #define NUM_JOB_THREADS "2"

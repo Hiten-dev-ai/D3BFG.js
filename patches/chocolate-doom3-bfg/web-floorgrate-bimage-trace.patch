@@ -1,0 +1,77 @@
+diff --git a/neo/renderer/BinaryImage.cpp b/neo/renderer/BinaryImage.cpp
+index d1a90f4..3e644b6 100644
+--- a/neo/renderer/BinaryImage.cpp
++++ b/neo/renderer/BinaryImage.cpp
+@@ -354,13 +354,29 @@ ID_TIME_T idBinaryImage::LoadFromGeneratedFile(ID_TIME_T sourceFileTime)
+ {
+     idStr binaryFileName;
+     MakeGeneratedFileName(binaryFileName);
++#if defined(__EMSCRIPTEN__)
++    const bool webTraceFloorGrate = strstr(binaryFileName.c_str(), "textures/washroom/rffloorgrate01") != NULL;
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image open started path=%s\n", binaryFileName.c_str());
++#endif
+     idFileLocal bFile = fileSystem->OpenFileRead(binaryFileName);
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image open returned found=%d bytes=%d\n", bFile != NULL, bFile != NULL ? bFile->Length() : 0);
++#endif
+     if (bFile == NULL) {
+         return FILE_NOT_FOUND_TIMESTAMP;
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image parse started\n");
++#endif
+     if (LoadFromGeneratedFile(bFile, sourceFileTime)) {
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image parse returned valid=1\n");
++#endif
+         return bFile->Timestamp();
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image parse returned valid=0\n");
++#endif
+     return FILE_NOT_FOUND_TIMESTAMP;
+ }
+ 
+diff --git a/neo/framework/FileSystem.cpp b/neo/framework/FileSystem.cpp
+index 632e895..22b6dd1 100644
+--- a/neo/framework/FileSystem.cpp
++++ b/neo/framework/FileSystem.cpp
+@@ -1743,7 +1743,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+ #if defined(__EMSCRIPTEN__)
+     const bool traceEyeLeft = idStr::Icmp(relativePath, "guis/assets/mainmenu/eye_left.tga") == 0;
+     const bool traceHudB = idStr::Icmp(relativePath, "guis/assets/hud/controller/xb360/b.tga") == 0;
+-    const bool traceFloorGrate = idStr::Icmp(relativePath, "textures/washroom/rffloorgrate01.tga") == 0;
++    const bool traceFloorGrate = idStr::Icmp(relativePath, "textures/washroom/rffloorgrate01.tga") == 0 ||
++        strstr(relativePath, "generated/images/textures/washroom/rffloorgrate01#") != NULL;
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left ReadFile started buffer=%d\n", buffer != NULL);
+     }
+@@ -1751,7 +1752,7 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+         idLib::Printf("[web-port image] hud_b ReadFile started buffer=%d\n", buffer != NULL);
+     }
+     if (traceFloorGrate) {
+-        idLib::Printf("[web-port image] floorgrate ReadFile started buffer=%d\n", buffer != NULL);
++        idLib::Printf("[web-port image] floorgrate ReadFile started path=%s buffer=%d\n", relativePath, buffer != NULL);
+     }
+ #endif
+ 
+@@ -2963,7 +2964,9 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+ #if defined(__EMSCRIPTEN__)
+     const bool traceEyeLeft = fileName != NULL && idStr::Icmp(fileName, "guis/assets/mainmenu/eye_left.tga") == 0;
+     const bool traceHudB = fileName != NULL && idStr::Icmp(fileName, "guis/assets/hud/controller/xb360/b.tga") == 0;
+-    const bool traceFloorGrate = fileName != NULL && idStr::Icmp(fileName, "textures/washroom/rffloorgrate01.tga") == 0;
++    const bool traceFloorGrate = fileName != NULL &&
++        (idStr::Icmp(fileName, "textures/washroom/rffloorgrate01.tga") == 0 ||
++            strstr(fileName, "generated/images/textures/washroom/rffloorgrate01#") != NULL);
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
+     }
+@@ -2971,7 +2974,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+         idLib::Printf("[web-port image] hud_b resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
+     }
+     if (traceFloorGrate) {
+-        idLib::Printf("[web-port image] floorgrate resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
++        idLib::Printf("[web-port image] floorgrate resource lookup started path=%s memFile=%d containers=%d\n", fileName, memFile, resourceFiles.Num());
+     }
+ #endif
+ 

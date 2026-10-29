@@ -1,0 +1,27 @@
+diff --git a/neo/renderer/RenderProgs_GLSL.cpp b/neo/renderer/RenderProgs_GLSL.cpp
+--- a/neo/renderer/RenderProgs_GLSL.cpp
++++ b/neo/renderer/RenderProgs_GLSL.cpp
+@@ -540,7 +540,11 @@ const char* vertexInsert_GLSL_ES_1_0 = {
+     "#version 100\n"
+     "#define GLES2\n"
+     "#define PC\n"
++#if defined(__EMSCRIPTEN__)
++    "precision highp float;\n"
++#else
+     "precision mediump float;\n"
++#endif
+     "\n"
+     "float saturate( float v ) { return clamp( v, 0.0, 1.0 ); }\n"
+     "vec2 saturate( vec2 v ) { return clamp( v, 0.0, 1.0 ); }\n"
+@@ -597,7 +601,11 @@ const char* fragmentInsert_GLSL_ES_1_0 = {
+     "#define GLES2\n"
+     "#define PC\n"
+     "#extension GL_OES_standard_derivatives : enable\n"
++#if defined(__EMSCRIPTEN__)
++    "precision highp float;\n"
++#else
+     "precision mediump float;\n"
++#endif
+     "\n"
+     "void clip( float v ) { if ( v < 0.0 ) { discard; } }\n"
+     "void clip( vec2 v ) { if ( any( lessThan( v, vec2( 0.0 ) ) ) ) { discard; } }\n"

@@ -1,0 +1,183 @@
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -290,4 +290,12 @@
+         game->MapShutdown();
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    // MapShutdown has closed map-owned resource readers, so staged archive
++    // File nodes can now be removed before returning to the title screen.
++    if (!WebReleaseMapResourcesExcept("")) {
++        common->Warning("Could not release staged map archives after UnloadMap.\n");
++    }
++#endif
++
+     if (writeDemo) {
+@@ -536,6 +536,62 @@
+     ClearWipe();
+     UpdateScreen(false);
+     common->Printf("[web-port map] native loading screen presented before archive staging\n");
++#endif
++
++    common->Printf("--------- Execute Map Change ---------\n");
++    common->Printf("Map: %s\n", matchParameters.mapName.c_str());
++
++    // ensure that r_znear is reset to the default value
++    // this fixes issues with the projection matrix getting messed up when switching maps or loading a saved game
++    // while an in-game cinematic is playing.
++    cvarSystem->SetCVarFloat("r_znear", 3.0f);
++
++    // reset all cheat cvars for a multiplayer game
++    if (IsMultiplayer()) {
++        cvarSystem->ResetFlaggedVariables(CVAR_CHEAT);
++    }
++
++    int start = Sys_Milliseconds();
++
++    for (int i = 0; i < MAX_INPUT_DEVICES; i++) {
++        Sys_SetRumble(i, 0, 0);
++    }
++
++    // close console and remove any prints from the notify lines
++    console->Close();
++
++    // clear all menu sounds
++    soundWorld->Pause();
++    menuSoundWorld->ClearAllSoundEmitters();
++    soundSystem->SetPlayingSoundWorld(menuSoundWorld);
++    soundSystem->Render();
++
++    // extract the map name from serverinfo
++    currentMapName = matchParameters.mapName;
++    currentMapName.StripFileExtension();
++
++    idStrStatic<MAX_OSPATH> fullMapName = "maps/";
++    fullMapName += currentMapName;
++    fullMapName.SetFileExtension("map");
++
++#ifdef __EMSCRIPTEN__
++    // Stop map entities and release the old world/archive before fetching the
++    // next full map archive. Keep the generated loading image alive in the
++    // native loading GUI while the archive is staged.
++    int webUnloadStart = Sys_Milliseconds();
++    common->Printf("[web-port map] UnloadMap before archive staging started\n");
++    UnloadMap();
++    int webUnloadElapsed = Sys_Milliseconds() - webUnloadStart;
++    common->Printf("[web-port map] UnloadMap before archive staging returned elapsed=%d ms\n", webUnloadElapsed);
++    renderWorld->InitFromMap(NULL);
++    if (webPreviousMapName.Length() > 0 && webPreviousMapName.Icmp(currentMapName) != 0 &&
++        !WebReleaseMapLoadingImage(webPreviousMapName.c_str())) {
++        common->Warning("Could not release the previous loading image for '%s'.\n", webPreviousMapName.c_str());
++    }
++    if (!WebReleaseMapResourcesExcept(currentMapName.c_str())) {
++        common->Warning("Could not release prior map archives after unloading '%s'.\n", currentMapName.c_str());
++    }
++
+     const bool webMapStaged = WebStageMapResources(currentMapName.c_str());
+     common->Printf("[web-port map] archive staging returned %s map=%s\n", webMapStaged ? "success" : "failure", currentMapName.c_str());
+     if (!webMapStaged) {
+@@ -549,53 +605,21 @@
+         session->QuitMatchToTitle();
+         return;
+     }
+-#endif
+-
+-    common->Printf("--------- Execute Map Change ---------\n");
+-    common->Printf("Map: %s\n", matchParameters.mapName.c_str());
+-
+-    // ensure that r_znear is reset to the default value
+-    // this fixes issues with the projection matrix getting messed up when switching maps or loading a saved game
+-    // while an in-game cinematic is playing.
+-    cvarSystem->SetCVarFloat("r_znear", 3.0f);
+-
+-    // reset all cheat cvars for a multiplayer game
+-    if (IsMultiplayer()) {
+-        cvarSystem->ResetFlaggedVariables(CVAR_CHEAT);
+-    }
+-
+-    int start = Sys_Milliseconds();
+-
+-    for (int i = 0; i < MAX_INPUT_DEVICES; i++) {
+-        Sys_SetRumble(i, 0, 0);
+-    }
+-
+-    // close console and remove any prints from the notify lines
+-    console->Close();
+-
+-    // clear all menu sounds
+-    soundWorld->Pause();
+-    menuSoundWorld->ClearAllSoundEmitters();
+-    soundSystem->SetPlayingSoundWorld(menuSoundWorld);
+-    soundSystem->Render();
+-
+-    // extract the map name from serverinfo
+-    currentMapName = matchParameters.mapName;
+-    currentMapName.StripFileExtension();
+-
+-    idStrStatic<MAX_OSPATH> fullMapName = "maps/";
+-    fullMapName += currentMapName;
+-    fullMapName.SetFileExtension("map");
+-
+-#ifdef __EMSCRIPTEN__
++
+     common->Printf("[web-port map] BeginLevelLoad started map=%s\n", currentMapName.c_str());
+-#endif
++#else
+     if (mapSpawnData.savegameFile) {
+         fileSystem->BeginLevelLoad(currentMapName, NULL, 0);
+     } else {
+         fileSystem->BeginLevelLoad(currentMapName, saveFile.GetDataPtr(), saveFile.GetAllocated());
+     }
+-#ifdef __EMSCRIPTEN__
++#endif
++#ifdef __EMSCRIPTEN__
++    if (mapSpawnData.savegameFile) {
++        fileSystem->BeginLevelLoad(currentMapName, NULL, 0);
++    } else {
++        fileSystem->BeginLevelLoad(currentMapName, saveFile.GetDataPtr(), saveFile.GetAllocated());
++    }
+     common->Printf("[web-port map] BeginLevelLoad returned map=%s\n", currentMapName.c_str());
+ #endif
+ 
+@@ -604,27 +628,15 @@
+ #ifndef __EMSCRIPTEN__
+     StartWipe("wipeMaterial", true);
+     CompleteWipe();
+-#endif
+-
+     int sm = Sys_Milliseconds();
+     // shut down the existing game if it is running
+-#ifdef __EMSCRIPTEN__
+-    common->Printf("[web-port map] UnloadMap started\n");
+-#endif
+     UnloadMap();
+     int ms = Sys_Milliseconds() - sm;
+     common->Printf("%6d msec to unload map\n", ms);
+-#ifdef __EMSCRIPTEN__
+-    common->Printf("[web-port map] UnloadMap returned elapsed=%d ms\n", ms);
+-    if (webPreviousMapName.Length() > 0 && webPreviousMapName.Icmp(currentMapName) != 0 &&
+-        !WebReleaseMapLoadingImage(webPreviousMapName.c_str())) {
+-        common->Warning("Could not release the previous loading image for '%s'.\n", webPreviousMapName.c_str());
+-    }
+-    if (!WebReleaseMapResourcesExcept(currentMapName.c_str())) {
+-        common->Warning("Could not release prior map archives after unloading '%s'.\n", currentMapName.c_str());
+-    }
+-#endif
+-
++#else
++    int sm = 0;
++    int ms = 0;
++#endif
+     // Free media from previous level and
+     // note which media we are going to need to load
+     sm = Sys_Milliseconds();
+@@ -647,9 +659,6 @@
+     // set the loading gui that we will wipe to
+     bool hellMap = false;
+     // Refresh the already-visible native loading SWF after the map archives mount.
+-#ifdef __EMSCRIPTEN__
+-    common->Printf("[web-port map] LoadLoadingGui started map=%s\n", currentMapName.c_str());
+-#endif
+     LoadLoadingGui(currentMapName, hellMap);
+ #ifdef __EMSCRIPTEN__
+     common->Printf("[web-port map] LoadLoadingGui returned map=%s\n", currentMapName.c_str());

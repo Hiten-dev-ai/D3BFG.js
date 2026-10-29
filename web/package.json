@@ -1,0 +1,22 @@
+{
+  "name": "d3bfg-js",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "start": "node server.js",
+    "test": "node --test *.test.js",
+    "play:game": "node scripts/play-game.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1",
+    "typescript": "~7.0.2",
+    "vite": "~8.3.5"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}

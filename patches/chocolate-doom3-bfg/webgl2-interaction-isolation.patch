@@ -1,0 +1,55 @@
+diff --git a/neo/renderer/tr_backend_draw.cpp b/neo/renderer/tr_backend_draw.cpp
+--- a/neo/renderer/tr_backend_draw.cpp
++++ b/neo/renderer/tr_backend_draw.cpp
+@@ -48,7 +48,8 @@
+ idCVar r_webPortDrawTrace("r_webPortDrawTrace", "0", CVAR_RENDERER | CVAR_BOOL, "trace a few opaque WebGL draws for browser renderer debugging");
+ idCVar r_webPortPassTrace("r_webPortPassTrace", "0", CVAR_RENDERER | CVAR_BOOL, "sample WebGL color after scene render passes for browser renderer debugging");
+ idCVar r_webPortFlatTrace("r_webPortFlatTrace", "0", CVAR_RENDERER | CVAR_BOOL, "draw opaque scene surfaces in a solid diagnostic color");
+ idCVar r_webPortBypassInteractionDepthStencil("r_webPortBypassInteractionDepthStencil", "0", CVAR_RENDERER | CVAR_BOOL, "bypass WebGL interaction depth and stencil tests for diagnostics");
++idCVar r_webPortInteractionIsolationMode("r_webPortInteractionIsolationMode", "0", CVAR_RENDERER | CVAR_INTEGER, "isolate WebGL interaction depth, stencil, and depth-bounds tests for diagnostics");
+ 
+ extern idCVar stereoRender_swapEyes;
+ 
+@@ -1970,7 +1970,11 @@ static void RB_DrawInteractions()
+     GL_SelectTexture(0);
+ 
+     const bool bypassInteractionDepthStencil = r_webPortBypassInteractionDepthStencil.GetBool();
+-    const bool useLightDepthBounds = !bypassInteractionDepthStencil && r_useLightDepthBounds.GetBool();
++    const int interactionIsolationMode = r_webPortInteractionIsolationMode.GetInteger();
++    const bool bypassInteractionDepth = bypassInteractionDepthStencil || interactionIsolationMode == 1;
++    const bool bypassInteractionStencil = bypassInteractionDepthStencil || interactionIsolationMode == 2;
++    const bool bypassInteractionDepthBounds = bypassInteractionDepthStencil || interactionIsolationMode == 3;
++    const bool useLightDepthBounds = !bypassInteractionDepthBounds && r_useLightDepthBounds.GetBool();
+ 
+     //
+     // for each light, perform shadowing and adding
+@@ -2021,7 +2021,9 @@ static void RB_DrawInteractions()
+         }
+ 
+         // only need to clear the stencil buffer and perform stencil testing if there are shadows
+-        const bool performStencilTest = !bypassInteractionDepthStencil && (vLight->globalShadows != NULL || vLight->localShadows != NULL);
+-        const int interactionDepthFunc = bypassInteractionDepthStencil ? GLS_DEPTHFUNC_ALWAYS : GLS_DEPTHFUNC_EQUAL;
++        const bool performStencilTest = !bypassInteractionStencil && (vLight->globalShadows != NULL || vLight->localShadows != NULL);
++        // GLS_DEPTHFUNC_LESS maps to GL_LEQUAL in GL_State; mode 4 tests depth-equality precision.
++        const int interactionDepthFunc = bypassInteractionDepth ? GLS_DEPTHFUNC_ALWAYS :
++            (interactionIsolationMode == 4 ? GLS_DEPTHFUNC_LESS : GLS_DEPTHFUNC_EQUAL);
+ 
+         // mirror flips the sense of the stencil select, and I don't want to risk accidentally breaking it
+@@ -2090,5 +2094,5 @@ static void RB_DrawInteractions()
+             // buffer and translucent surfaces do not contribute to the view depth buffer.
+ 
+-            RB_RenderInteractions(vLight->translucentInteractions, vLight, bypassInteractionDepthStencil ? GLS_DEPTHFUNC_ALWAYS : GLS_DEPTHFUNC_LESS, false, false);
++            RB_RenderInteractions(vLight->translucentInteractions, vLight, bypassInteractionDepth ? GLS_DEPTHFUNC_ALWAYS : GLS_DEPTHFUNC_LESS, false, false);
+ 
+             renderLog.CloseBlock();
+@@ -2113,7 +2117,8 @@ static void RB_DrawInteractions()
+ #if defined(__EMSCRIPTEN__)
+     if (traceWebPortInteractions) {
+-        common->Printf("[web-port lighting] summary lights=%d active=%d local=%d global=%d translucent=%d\n",
+-            webPortLightCount, webPortLightsWithInteractions, webPortLocalInteractionCount, webPortGlobalInteractionCount, webPortTranslucentInteractionCount);
++        common->Printf("[web-port lighting] summary isolation=%d lights=%d active=%d local=%d global=%d translucent=%d\n",
++            bypassInteractionDepthStencil ? 5 : interactionIsolationMode, webPortLightCount, webPortLightsWithInteractions,
++            webPortLocalInteractionCount, webPortGlobalInteractionCount, webPortTranslucentInteractionCount);
+         webPortInteractionTraceFrames++;
+     }
+ #endif

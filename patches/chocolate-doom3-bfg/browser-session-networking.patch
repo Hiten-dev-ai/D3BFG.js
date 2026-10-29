@@ -1,0 +1,16 @@
+diff --git a/neo/sys/common/session_local.cpp b/neo/sys/common/session_local.cpp
+--- a/neo/sys/common/session_local.cpp
++++ b/neo/sys/common/session_local.cpp
+@@ -601,6 +601,12 @@
+ idSessionLocalWin::EnsurePort
+ ========================
+ */
+ void idSessionLocalWin::EnsurePort()
+ {
++#ifdef __EMSCRIPTEN__
++    // Browsers do not expose raw UDP sockets; the offline direct lobby needs no port.
++    canJoinLocalHost = false;
++    return;
++#endif
++
+     // Init the port using reqular sockets

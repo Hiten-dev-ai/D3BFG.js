@@ -1,0 +1,59 @@
+diff --git a/neo/renderer/tr_backend_draw.cpp b/neo/renderer/tr_backend_draw.cpp
+index 2684a57..edf44d3 100644
+--- a/neo/renderer/tr_backend_draw.cpp
++++ b/neo/renderer/tr_backend_draw.cpp
+@@ -47,6 +47,7 @@ idCVar r_useLightStencilSelect("r_useLightStencilSelect", "0", CVAR_RENDERER | C
+ idCVar r_webPortDrawTrace("r_webPortDrawTrace", "0", CVAR_RENDERER | CVAR_BOOL, "trace a few opaque WebGL draws for browser renderer debugging");
+ idCVar r_webPortPassTrace("r_webPortPassTrace", "0", CVAR_RENDERER | CVAR_BOOL, "sample WebGL color after scene render passes for browser renderer debugging");
+ idCVar r_webPortFlatTrace("r_webPortFlatTrace", "0", CVAR_RENDERER | CVAR_BOOL, "draw opaque scene surfaces in a solid diagnostic color");
++idCVar r_webPortBypassInteractionDepthStencil("r_webPortBypassInteractionDepthStencil", "0", CVAR_RENDERER | CVAR_BOOL, "bypass WebGL interaction depth and stencil tests for diagnostics");
+ 
+ extern idCVar stereoRender_swapEyes;
+ 
+@@ -1967,7 +1968,8 @@ static void RB_DrawInteractions()
+ 
+     GL_SelectTexture(0);
+ 
+-    const bool useLightDepthBounds = r_useLightDepthBounds.GetBool();
++    const bool bypassInteractionDepthStencil = r_webPortBypassInteractionDepthStencil.GetBool();
++    const bool useLightDepthBounds = !bypassInteractionDepthStencil && r_useLightDepthBounds.GetBool();
+ 
+     //
+     // for each light, perform shadowing and adding
+@@ -2019,7 +2021,8 @@ static void RB_DrawInteractions()
+         }
+ 
+         // only need to clear the stencil buffer and perform stencil testing if there are shadows
+-        const bool performStencilTest = (vLight->globalShadows != NULL || vLight->localShadows != NULL);
++        const bool performStencilTest = !bypassInteractionDepthStencil && (vLight->globalShadows != NULL || vLight->localShadows != NULL);
++        const int interactionDepthFunc = bypassInteractionDepthStencil ? GLS_DEPTHFUNC_ALWAYS : GLS_DEPTHFUNC_EQUAL;
+ 
+         // mirror flips the sense of the stencil select, and I don't want to risk accidentally breaking it
+         // in the normal case, so simply disable the stencil select in the mirror case
+@@ -2057,7 +2060,7 @@ static void RB_DrawInteractions()
+ 
+         if (vLight->localInteractions != NULL) {
+             renderLog.OpenBlock("Local Light Interactions");
+-            RB_RenderInteractions(vLight->localInteractions, vLight, GLS_DEPTHFUNC_EQUAL, performStencilTest, useLightDepthBounds);
++            RB_RenderInteractions(vLight->localInteractions, vLight, interactionDepthFunc, performStencilTest, useLightDepthBounds);
+             renderLog.CloseBlock();
+         }
+ 
+@@ -2069,7 +2072,7 @@ static void RB_DrawInteractions()
+ 
+         if (vLight->globalInteractions != NULL) {
+             renderLog.OpenBlock("Global Light Interactions");
+-            RB_RenderInteractions(vLight->globalInteractions, vLight, GLS_DEPTHFUNC_EQUAL, performStencilTest, useLightDepthBounds);
++            RB_RenderInteractions(vLight->globalInteractions, vLight, interactionDepthFunc, performStencilTest, useLightDepthBounds);
+             renderLog.CloseBlock();
+         }
+ 
+@@ -2090,7 +2093,7 @@ static void RB_DrawInteractions()
+             // stencil shadows only affect surfaces that contribute to the view depth
+             // buffer and translucent surfaces do not contribute to the view depth buffer.
+ 
+-            RB_RenderInteractions(vLight->translucentInteractions, vLight, GLS_DEPTHFUNC_LESS, false, false);
++            RB_RenderInteractions(vLight->translucentInteractions, vLight, bypassInteractionDepthStencil ? GLS_DEPTHFUNC_ALWAYS : GLS_DEPTHFUNC_LESS, false, false);
+ 
+             renderLog.CloseBlock();
+         }

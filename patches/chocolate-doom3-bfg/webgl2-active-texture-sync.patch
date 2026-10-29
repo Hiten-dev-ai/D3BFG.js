@@ -1,0 +1,23 @@
+diff --git a/neo/renderer/OpenGL/gl_GraphicsAPIWrapper.cpp b/neo/renderer/OpenGL/gl_GraphicsAPIWrapper.cpp
+index 63199dc..5569381 100644
+--- a/neo/renderer/OpenGL/gl_GraphicsAPIWrapper.cpp
++++ b/neo/renderer/OpenGL/gl_GraphicsAPIWrapper.cpp
+@@ -39,10 +39,15 @@ GL_SelectTexture
+ void GL_SelectTexture(int unit)
+ {
+-    if (backEnd.glState.currenttmu == unit) {
++    if (unit < 0 || unit >= glConfig.maxTextureImageUnits) {
++        common->Warning("GL_SelectTexture: unit = %i", unit);
+         return;
+     }
+ 
+-    if (unit < 0 || unit >= glConfig.maxTextureImageUnits) {
+-        common->Warning("GL_SelectTexture: unit = %i", unit);
++#ifdef __EMSCRIPTEN__
++    // Keep WebGL's physical active unit aligned even when the logical unit is unchanged.
++    qglActiveTextureARB(GL_TEXTURE0_ARB + unit);
++#endif
++
++    if (backEnd.glState.currenttmu == unit) {
+         return;
+     }

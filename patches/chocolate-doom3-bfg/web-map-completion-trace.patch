@@ -1,0 +1,11 @@
+diff --git a/neo/framework/Common_load.cpp b/neo/framework/Common_load.cpp
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -465,4 +465,7 @@ void idCommonLocal::ExecuteMapChange()
+     // we are valid for game draws now
+     insideExecuteMapChange = false;
+     mapSpawned = true;
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] ExecuteMapChange reached mapSpawned map=%s\n", currentMapName.c_str());
++#endif
+     Sys_ClearEvents();

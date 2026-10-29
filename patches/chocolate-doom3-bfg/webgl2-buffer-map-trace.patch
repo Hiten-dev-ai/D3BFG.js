@@ -1,0 +1,143 @@
+diff --git a/neo/renderer/BufferObject.cpp b/neo/renderer/BufferObject.cpp
+index 6fd7c1f..d3408b4 100644
+--- a/neo/renderer/BufferObject.cpp
++++ b/neo/renderer/BufferObject.cpp
+@@ -40,5 +40,45 @@ static const GLenum bufferUsage = GL_DYNAMIC_DRAW_ARB;
+ // Its WebGL shim rejects read and unsynchronized map flags and requires an invalidate hint.
+ static const GLbitfield WEBGL_BUFFER_WRITE_MAP_FLAGS = GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_FLUSH_EXPLICIT_BIT;
++
++static idCVar r_webPortBufferTrace("r_webPortBufferTrace", "0", CVAR_BOOL, "Trace WebGL streaming-buffer map, flush, and unmap calls");
++static int webPortBufferTraceEvents = 0;
++
++static GLbitfield WebPortBufferMapFlags(bufferMapType_t mapType)
++{
++    return mapType == BM_READ ? GL_MAP_READ_BIT : WEBGL_BUFFER_WRITE_MAP_FLAGS;
++}
++
++static void WebPortTraceBuffer(const char* bufferKind, const char* operation, GLenum target, const void* apiObject, GLintptrARB offset, GLintptrARB length, int allocSize, bool mapped, int mode, GLbitfield flags, bool explicitFlush, const void* mappedPointer, int result = -1)
++{
++    if (!r_webPortBufferTrace.GetBool() || webPortBufferTraceEvents >= 512) {
++        return;
++    }
++
++    GLenum bindingQuery = 0;
++    switch (target) {
++    case GL_ARRAY_BUFFER_ARB:
++        bindingQuery = GL_ARRAY_BUFFER_BINDING_ARB;
++        break;
++    case GL_ELEMENT_ARRAY_BUFFER_ARB:
++        bindingQuery = GL_ELEMENT_ARRAY_BUFFER_BINDING_ARB;
++        break;
++    case GL_UNIFORM_BUFFER:
++        bindingQuery = GL_UNIFORM_BUFFER_BINDING;
++        break;
++    default:
++        break;
++    }
++
++    GLint boundBuffer = -1;
++    if (bindingQuery != 0) {
++        qglGetIntegerv(bindingQuery, &boundBuffer);
++    }
++
++    idLib::Printf("[web-port buffer] event=%d kind=%s op=%s target=0x%04x object=%p bound=%d offset=%lld length=%lld alloc=%d mapped=%d mode=%d flags=0x%x explicit=%d result=%d ptr=%p\n",
++        webPortBufferTraceEvents++, bufferKind, operation, (unsigned int)target, apiObject, boundBuffer,
++        (long long)offset, (long long)length, allocSize, mapped ? 1 : 0, mode, (unsigned int)flags,
++        explicitFlush ? 1 : 0, result, mappedPointer);
++}
+ #endif
+ 
+ // RB begin
+@@ -368,6 +407,9 @@ void* idVertexBuffer::MapBuffer(bufferMapType_t mapType) const
+         assert(false);
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("vertex", "map", GL_ARRAY_BUFFER_ARB, apiObject, 0, GetAllocedSize(), GetAllocedSize(), buffer != NULL, mapType, WebPortBufferMapFlags(mapType), mapType != BM_READ, buffer);
++#endif
+     const_cast<bool&>(explicitFlush) = (mapType != BM_READ);
+     SetMapped();
+ 
+@@ -396,9 +438,19 @@ void idVertexBuffer::UnmapBuffer(int flushStart, int flushEnd) const
+         flushEnd = GetAllocedSize();
+     }
+     if (explicitFlush && flushEnd > flushStart) {
++#if defined(__EMSCRIPTEN__)
++        WebPortTraceBuffer("vertex", "flush", GL_ARRAY_BUFFER_ARB, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, explicitFlush ? WEBGL_BUFFER_WRITE_MAP_FLAGS : GL_MAP_READ_BIT, explicitFlush, NULL);
++#endif
+         qglFlushMappedBufferRange(GL_ARRAY_BUFFER_ARB, flushStart, flushEnd - flushStart);
+     }
+-    if (!qglUnmapBufferARB(GL_ARRAY_BUFFER_ARB)) {
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("vertex", "unmap", GL_ARRAY_BUFFER_ARB, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, explicitFlush ? WEBGL_BUFFER_WRITE_MAP_FLAGS : GL_MAP_READ_BIT, explicitFlush, NULL);
++#endif
++    const GLboolean unmapResult = qglUnmapBufferARB(GL_ARRAY_BUFFER_ARB);
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("vertex", "unmap-result", GL_ARRAY_BUFFER_ARB, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, explicitFlush ? WEBGL_BUFFER_WRITE_MAP_FLAGS : GL_MAP_READ_BIT, explicitFlush, NULL, unmapResult);
++#endif
++    if (!unmapResult) {
+         idLib::Printf("idVertexBuffer::UnmapBuffer failed\n");
+     }
+ 
+@@ -655,6 +707,9 @@ void* idIndexBuffer::MapBuffer(bufferMapType_t mapType) const
+         assert(false);
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("index", "map", GL_ELEMENT_ARRAY_BUFFER_ARB, apiObject, 0, GetAllocedSize(), GetAllocedSize(), buffer != NULL, mapType, WebPortBufferMapFlags(mapType), mapType != BM_READ, buffer);
++#endif
+     const_cast<bool&>(explicitFlush) = (mapType != BM_READ);
+     SetMapped();
+ 
+@@ -683,9 +738,19 @@ void idIndexBuffer::UnmapBuffer(int flushStart, int flushEnd) const
+         flushEnd = GetAllocedSize();
+     }
+     if (explicitFlush && flushEnd > flushStart) {
++#if defined(__EMSCRIPTEN__)
++        WebPortTraceBuffer("index", "flush", GL_ELEMENT_ARRAY_BUFFER_ARB, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, explicitFlush ? WEBGL_BUFFER_WRITE_MAP_FLAGS : GL_MAP_READ_BIT, explicitFlush, NULL);
++#endif
+         qglFlushMappedBufferRange(GL_ELEMENT_ARRAY_BUFFER_ARB, flushStart, flushEnd - flushStart);
+     }
+-    if (!qglUnmapBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB)) {
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("index", "unmap", GL_ELEMENT_ARRAY_BUFFER_ARB, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, explicitFlush ? WEBGL_BUFFER_WRITE_MAP_FLAGS : GL_MAP_READ_BIT, explicitFlush, NULL);
++#endif
++    const GLboolean unmapResult = qglUnmapBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB);
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("index", "unmap-result", GL_ELEMENT_ARRAY_BUFFER_ARB, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, explicitFlush ? WEBGL_BUFFER_WRITE_MAP_FLAGS : GL_MAP_READ_BIT, explicitFlush, NULL, unmapResult);
++#endif
++    if (!unmapResult) {
+         idLib::Printf("idIndexBuffer::UnmapBuffer failed\n");
+     }
+ 
+@@ -906,6 +971,9 @@ float* idJointBuffer::MapBuffer(bufferMapType_t mapType) const
+         buffer = (byte*)buffer + GetOffset();
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("joint", "map", GL_UNIFORM_BUFFER, apiObject, 0, GetAllocedSize(), GetAllocedSize(), buffer != NULL, mapType, WEBGL_BUFFER_WRITE_MAP_FLAGS, true, buffer);
++#endif
+     SetMapped();
+ 
+     if (buffer == NULL) {
+@@ -932,9 +1000,19 @@ void idJointBuffer::UnmapBuffer(int flushStart, int flushEnd) const
+         flushEnd = GetAllocedSize();
+     }
+     if (flushEnd > flushStart) {
++#if defined(__EMSCRIPTEN__)
++        WebPortTraceBuffer("joint", "flush", GL_UNIFORM_BUFFER, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, WEBGL_BUFFER_WRITE_MAP_FLAGS, true, NULL);
++#endif
+         qglFlushMappedBufferRange(GL_UNIFORM_BUFFER, flushStart, flushEnd - flushStart);
+     }
+-    if (!qglUnmapBufferARB(GL_UNIFORM_BUFFER)) {
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("joint", "unmap", GL_UNIFORM_BUFFER, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, WEBGL_BUFFER_WRITE_MAP_FLAGS, true, NULL);
++#endif
++    const GLboolean unmapResult = qglUnmapBufferARB(GL_UNIFORM_BUFFER);
++#if defined(__EMSCRIPTEN__)
++    WebPortTraceBuffer("joint", "unmap-result", GL_UNIFORM_BUFFER, apiObject, flushStart, flushEnd - flushStart, GetAllocedSize(), IsMapped(), -1, WEBGL_BUFFER_WRITE_MAP_FLAGS, true, NULL, unmapResult);
++#endif
++    if (!unmapResult) {
+         idLib::Printf("idJointBuffer::UnmapBuffer failed\n");
+     }
+ 

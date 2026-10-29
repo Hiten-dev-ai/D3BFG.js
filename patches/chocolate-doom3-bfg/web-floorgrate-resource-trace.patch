@@ -1,0 +1,267 @@
+diff --git a/neo/renderer/Image_files.cpp b/neo/renderer/Image_files.cpp
+index 741305d..176a874 100644
+--- a/neo/renderer/Image_files.cpp
++++ b/neo/renderer/Image_files.cpp
+@@ -152,9 +152,19 @@ static void LoadTGA(const char* name, byte** pic, int* width, int* height, ID_TI
+     byte* buffer;
+     TargaHeader targa_header;
+     byte* targa_rgba;
++#if defined(__EMSCRIPTEN__)
++    const bool webTraceFloorGrate = name != NULL && idStr::Icmp(name, "textures/washroom/rffloorgrate01.tga") == 0;
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate LoadTGA enter pixels=%d\n", pic != NULL);
++#endif
+ 
+     if (!pic) {
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA metadata ReadFile started\n");
++#endif
+         fileSystem->ReadFile(name, NULL, timestamp);
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA metadata ReadFile returned\n");
++#endif
+         return; // just getting timestamp
+     }
+ 
+@@ -163,7 +173,13 @@ static void LoadTGA(const char* name, byte** pic, int* width, int* height, ID_TI
+     //
+     // load the file
+     //
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA pixel ReadFile started\n");
++#endif
+     fileSize = fileSystem->ReadFile(name, (void**)&buffer, timestamp);
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA pixel ReadFile returned bytes=%d data=%d\n", fileSize, buffer != NULL);
++#endif
+     if (!buffer) {
+         return;
+     }
+@@ -189,6 +205,9 @@ static void LoadTGA(const char* name, byte** pic, int* width, int* height, ID_TI
+     buf_p += 2;
+     targa_header.pixel_size = *buf_p++;
+     targa_header.attributes = *buf_p++;
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA header width=%d height=%d type=%d bits=%d bytes=%d\n", targa_header.width, targa_header.height, targa_header.image_type, targa_header.pixel_size, fileSize);
++#endif
+ 
+     if (targa_header.image_type != 2 && targa_header.image_type != 10 && targa_header.image_type != 3) {
+         common->Error("LoadTGA( %s ): Only type 2 (RGB), 3 (gray), and 10 (RGB) TGA images supported\n", name);
+@@ -222,6 +241,9 @@ static void LoadTGA(const char* name, byte** pic, int* width, int* height, ID_TI
+ 
+     targa_rgba = (byte*)R_StaticAlloc(numPixels * 4, TAG_IMAGE);
+     *pic = targa_rgba;
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA decode started pixels=%d\n", numPixels);
++#endif
+ 
+     if (targa_header.id_length != 0) {
+         buf_p += targa_header.id_length; // skip TARGA image comment
+@@ -372,6 +394,9 @@ static void LoadTGA(const char* name, byte** pic, int* width, int* height, ID_TI
+             R_VerticalFlip(*pic, *width, *height);
+         }
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate TGA decode returned\n");
++#endif
+ 
+     fileSystem->FreeFile(buffer);
+ }
+@@ -591,7 +616,9 @@ void R_LoadImage(const char* cname, byte** pic, int* width, int* height, ID_TIME
+     idStr name = cname;
+ #if defined(__EMSCRIPTEN__)
+     const bool webFontTrace = cname && idStr::Icmpn(cname, "newfonts/", 9) == 0;
++    const bool webTraceFloorGrate = cname && idStr::Icmp(cname, "textures/washroom/rffloorgrate01") == 0;
+     if (webFontTrace) common->Printf("[web-port trace] font R_LoadImage begin '%s'\n", cname);
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate R_LoadImage enter pixels=%d\n", pic != NULL);
+ #endif
+ 
+     if (pic) {
+@@ -620,10 +647,12 @@ void R_LoadImage(const char* cname, byte** pic, int* width, int* height, ID_TIME
+     if (ext == "tga") {
+ #if defined(__EMSCRIPTEN__)
+         if (webFontTrace) common->Printf("[web-port trace] font LoadTGA begin '%s'\n", name.c_str());
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate LoadTGA call started\n");
+ #endif
+         LoadTGA(name.c_str(), pic, width, height, timestamp);      // try tga first
+ #if defined(__EMSCRIPTEN__)
+         if (webFontTrace) common->Printf("[web-port trace] font LoadTGA complete '%s' %dx%d\n", name.c_str(), width ? *width : -1, height ? *height : -1);
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate LoadTGA call returned size=%dx%d data=%d\n", width ? *width : -1, height ? *height : -1, pic && *pic != NULL);
+ #endif
+         if ((pic && *pic == 0) || (timestamp && *timestamp == -1)) //-V595
+         {
+@@ -636,6 +665,7 @@ void R_LoadImage(const char* cname, byte** pic, int* width, int* height, ID_TIME
+     }
+ #if defined(__EMSCRIPTEN__)
+     if (webFontTrace) common->Printf("[web-port trace] font R_LoadImage complete '%s'\n", name.c_str());
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate R_LoadImage returned size=%dx%d data=%d\n", width ? *width : -1, height ? *height : -1, pic && *pic != NULL);
+ #endif
+ 
+     if ((width && *width < 1) || (height && *height < 1)) {
+diff --git a/neo/framework/FileSystem.cpp b/neo/framework/FileSystem.cpp
+index 0f251fc..632e895 100644
+--- a/neo/framework/FileSystem.cpp
++++ b/neo/framework/FileSystem.cpp
+@@ -1743,12 +1743,16 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+ #if defined(__EMSCRIPTEN__)
+     const bool traceEyeLeft = idStr::Icmp(relativePath, "guis/assets/mainmenu/eye_left.tga") == 0;
+     const bool traceHudB = idStr::Icmp(relativePath, "guis/assets/hud/controller/xb360/b.tga") == 0;
++    const bool traceFloorGrate = idStr::Icmp(relativePath, "textures/washroom/rffloorgrate01.tga") == 0;
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left ReadFile started buffer=%d\n", buffer != NULL);
+     }
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b ReadFile started buffer=%d\n", buffer != NULL);
+     }
++    if (traceFloorGrate) {
++        idLib::Printf("[web-port image] floorgrate ReadFile started buffer=%d\n", buffer != NULL);
++    }
+ #endif
+ 
+     if (timestamp) {
+@@ -1802,6 +1806,9 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b OpenFileRead started\n");
+     }
++    if (traceFloorGrate) {
++        idLib::Printf("[web-port image] floorgrate OpenFileRead started\n");
++    }
+ #endif
+     f = OpenFileRead(relativePath, (buffer != NULL));
+ #if defined(__EMSCRIPTEN__)
+@@ -1811,6 +1818,9 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b OpenFileRead returned found=%d\n", f != NULL);
+     }
++    if (traceFloorGrate) {
++        idLib::Printf("[web-port image] floorgrate OpenFileRead returned found=%d\n", f != NULL);
++    }
+ #endif
+     if (f == NULL) {
+         // RB: moved here
+@@ -1839,6 +1849,9 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+ 
+     if (!buffer) {
+         CloseFile(f);
++#if defined(__EMSCRIPTEN__)
++        if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate ReadFile metadata returned bytes=%d\n", len);
++#endif
+         return len;
+     }
+ 
+@@ -1855,6 +1868,9 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b ordinary file read started bytes=%d\n", len);
+     }
++    if (traceFloorGrate) {
++        idLib::Printf("[web-port image] floorgrate ordinary file read started bytes=%d\n", len);
++    }
+ #endif
+     f->Read(buf, len);
+ #if defined(__EMSCRIPTEN__)
+@@ -1864,6 +1880,9 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b ordinary file read returned\n");
+     }
++    if (traceFloorGrate) {
++        idLib::Printf("[web-port image] floorgrate ordinary file read returned\n");
++    }
+ #endif
+ 
+     // guarantee that it will have a trailing 0 for string operations
+@@ -2944,12 +2963,16 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+ #if defined(__EMSCRIPTEN__)
+     const bool traceEyeLeft = fileName != NULL && idStr::Icmp(fileName, "guis/assets/mainmenu/eye_left.tga") == 0;
+     const bool traceHudB = fileName != NULL && idStr::Icmp(fileName, "guis/assets/hud/controller/xb360/b.tga") == 0;
++    const bool traceFloorGrate = fileName != NULL && idStr::Icmp(fileName, "textures/washroom/rffloorgrate01.tga") == 0;
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
+     }
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
+     }
++    if (traceFloorGrate) {
++        idLib::Printf("[web-port image] floorgrate resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
++    }
+ #endif
+ 
+     if (resourceFiles.Num() == 0) {
+@@ -2957,11 +2980,15 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+         if (traceEyeLeft) {
+             idLib::Printf("[web-port map] eye_left resource lookup returned no containers\n");
+         }
++        if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource lookup returned no containers\n");
+ #endif
+         return NULL;
+     }
+ 
+     static idResourceCacheEntry rc;
++#if defined(__EMSCRIPTEN__)
++    if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource index lookup started\n");
++#endif
+     const bool resourceFound = GetResourceCacheEntry(fileName, rc);
+ #if defined(__EMSCRIPTEN__)
+     if (traceEyeLeft) {
+@@ -2970,6 +2997,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+     if (traceHudB) {
+         idLib::Printf("[web-port image] hud_b resource lookup returned found=%d\n", resourceFound);
+     }
++    if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource index lookup returned found=%d\n", resourceFound);
+ #endif
+     if (resourceFound) {
+ #if defined(__EMSCRIPTEN__)
+@@ -2979,6 +3007,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+         if (traceHudB) {
+             idLib::Printf("[web-port image] hud_b resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
+         }
++        if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
+ #endif
+         if (fs_debugResources.GetBool()) {
+             idLib::Printf("RES: loading file %s\n", rc.filename.c_str());
+@@ -3003,6 +3032,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             if (traceHudB) {
+                 idLib::Printf("[web-port image] hud_b resource bytes read started length=%d\n", rc.length);
+             }
++            if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource bytes read started length=%d\n", rc.length);
+ #endif
+             file->Read((void*)buf, rc.length);
+ #if defined(__EMSCRIPTEN__)
+@@ -3012,16 +3042,23 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             if (traceHudB) {
+                 idLib::Printf("[web-port image] hud_b resource bytes read returned\n");
+             }
++            if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource bytes read returned\n");
+ #endif
+ 
+             if (buf == resourceBufferPtr) {
+                 file->SetResourceBuffer(buf);
++#if defined(__EMSCRIPTEN__)
++                if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource returned shared buffer\n");
++#endif
+                 return file;
+             } else {
+                 idFile_Memory* mfile = new idFile_Memory(rc.filename, (const char*)buf, rc.length);
+                 if (mfile != NULL) {
+                     mfile->TakeDataOwnership();
+                     delete file;
++#if defined(__EMSCRIPTEN__)
++                    if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource returned memory file bytes=%d\n", rc.length);
++#endif
+                     return mfile;
+                 }
+             }
+@@ -3030,6 +3067,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+         if (traceEyeLeft) {
+             idLib::Printf("[web-port map] eye_left resource file returned streaming=%d\n", file != NULL);
+         }
++        if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource file returned streaming=%d\n", file != NULL);
+ #endif
+         return file;
+     }
+@@ -3038,6 +3076,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left resource lookup returned missing\n");
+     }
++    if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource lookup returned missing\n");
+ #endif
+     return NULL;
+ }

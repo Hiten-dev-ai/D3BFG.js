@@ -1,0 +1,12 @@
+diff --git a/neo/idlib/ParallelJobList.cpp b/neo/idlib/ParallelJobList.cpp
+--- a/neo/idlib/ParallelJobList.cpp
++++ b/neo/idlib/ParallelJobList.cpp
+@@ -1245,6 +1245,8 @@
+     for (int i = 0; i < MAX_JOB_THREADS; i++) {
++        idLib::Printf("[web-port trace] parallel job thread start index=%d\n", i);
+         threads[i].Start(cores[i], i);
++        idLib::Printf("[web-port trace] parallel job thread ready index=%d\n", i);
+     }
+     maxThreads = jobs_numThreads.GetInteger();
+ 
+     Sys_CPUCount(numLogicalCpuCores, numPhysicalCpuCores, numCpuPackages);

@@ -1,0 +1,7 @@
+diff --git a/src/lib/libwebgl.js b/src/lib/libwebgl.js
+--- a/src/lib/libwebgl.js
++++ b/src/lib/libwebgl.js
+@@ -4245,2 +4245,2 @@
+-    webglBufferSubData(target, mapping.offset, length, mapping.mem + offset);
++    webglBufferSubData(target, mapping.offset + offset, length, mapping.mem + offset);
+   },

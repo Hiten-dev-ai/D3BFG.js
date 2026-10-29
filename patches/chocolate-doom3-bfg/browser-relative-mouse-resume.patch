@@ -1,0 +1,34 @@
+diff --git a/neo/sys/sdl/sdl_glimp.cpp b/neo/sys/sdl/sdl_glimp.cpp
+index 524a987..0000000 100644
+--- a/neo/sys/sdl/sdl_glimp.cpp
++++ b/neo/sys/sdl/sdl_glimp.cpp
+@@ -42,4 +42,5 @@
+ #if defined(__EMSCRIPTEN__)
+ #include <emscripten/emscripten.h>
++#include <emscripten/em_asm.h>
+ #include <emscripten/html5.h>
+ #endif
+@@ -643,7 +644,23 @@ void GLimp_GrabInput(int flags)
+     if (in_nograb.GetBool())
+         grab = false;
+ 
++#if defined(__EMSCRIPTEN__)
++    // SDL's relative-mode request can be denied outside a browser gesture.
++    // Publish the engine's effective intent on the browser thread so the web
++    // shell can retry pointer lock only on a trusted click during gameplay.
++    static bool browserRelativeMouseWanted = false;
++    if (browserRelativeMouseWanted != grab) {
++        browserRelativeMouseWanted = grab;
++        MAIN_THREAD_ASYNC_EM_ASM({
++            document.documentElement.dataset.doom3RelativeMouse = $0 ? '1' : '0';
++            document.dispatchEvent(new CustomEvent('doom3-relative-mouse', {
++                detail: { enabled: !!$0 }
++            }));
++        }, grab ? 1 : 0);
++    }
++#endif
++
+     if (!window) {
+         common->Warning("GLimp_GrabInput called without window");
+         return;
+     }

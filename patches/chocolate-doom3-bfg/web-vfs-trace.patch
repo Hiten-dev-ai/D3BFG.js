@@ -1,0 +1,153 @@
+diff --git a/neo/framework/File.cpp b/neo/framework/File.cpp
+index 48bbced..988a3f1 100644
+--- a/neo/framework/File.cpp
++++ b/neo/framework/File.cpp
+@@ -1837,7 +1837,18 @@ int idFile_InnerResource::Read(void* buffer, int len)
+             memcpy(buffer, &resourceBuffer[internalFilePos], len);
+             read = len;
+         } else {
++#if defined(__EMSCRIPTEN__)
++            const bool traceEyeLeft = idStr::Icmp(name.c_str(), "guis/assets/mainmenu/eye_left.tga") == 0;
++            if (traceEyeLeft) {
++                idLib::Printf("[web-port map] eye_left archive read started offset=%d length=%d archive=%s\n", offset + internalFilePos, len, resourceFile->GetName());
++            }
++#endif
+             read = fileSystem->ReadFromBGL(resourceFile, buffer, offset + internalFilePos, len);
++#if defined(__EMSCRIPTEN__)
++            if (traceEyeLeft) {
++                idLib::Printf("[web-port map] eye_left archive read returned bytes=%d\n", read);
++            }
++#endif
+         }
+     }
+ 
+diff --git a/neo/framework/FileSystem.cpp b/neo/framework/FileSystem.cpp
+index 310bae2..33c7a96 100644
+--- a/neo/framework/FileSystem.cpp
++++ b/neo/framework/FileSystem.cpp
+@@ -1740,6 +1740,13 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+         return 0;
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    const bool traceEyeLeft = idStr::Icmp(relativePath, "guis/assets/mainmenu/eye_left.tga") == 0;
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left ReadFile started buffer=%d\n", buffer != NULL);
++    }
++#endif
++
+     if (timestamp) {
+         *timestamp = FILE_NOT_FOUND_TIMESTAMP;
+     }
+@@ -1784,7 +1791,17 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     }
+ 
+     // look for it in the filesystem or pack files
++#if defined(__EMSCRIPTEN__)
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left OpenFileRead started\n");
++    }
++#endif
+     f = OpenFileRead(relativePath, (buffer != NULL));
++#if defined(__EMSCRIPTEN__)
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left OpenFileRead returned found=%d\n", f != NULL);
++    }
++#endif
+     if (f == NULL) {
+         // RB: moved here
+         if (buffer == NULL && timestamp != NULL && resourceFiles.Num() > 0) {
+@@ -1821,7 +1838,17 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     buf = (byte*)Mem_ClearedAlloc(len + 1, TAG_IDFILE);
+     *buffer = buf;
+ 
++#if defined(__EMSCRIPTEN__)
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left ordinary file read started bytes=%d\n", len);
++    }
++#endif
+     f->Read(buf, len);
++#if defined(__EMSCRIPTEN__)
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left ordinary file read returned\n");
++    }
++#endif
+ 
+     // guarantee that it will have a trailing 0 for string operations
+     buf[len] = 0;
+@@ -2889,12 +2925,35 @@ Returns NULL
+ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+ {
+ 
++#if defined(__EMSCRIPTEN__)
++    const bool traceEyeLeft = fileName != NULL && idStr::Icmp(fileName, "guis/assets/mainmenu/eye_left.tga") == 0;
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
++    }
++#endif
++
+     if (resourceFiles.Num() == 0) {
++#if defined(__EMSCRIPTEN__)
++        if (traceEyeLeft) {
++            idLib::Printf("[web-port map] eye_left resource lookup returned no containers\n");
++        }
++#endif
+         return NULL;
+     }
+ 
+     static idResourceCacheEntry rc;
+-    if (GetResourceCacheEntry(fileName, rc)) {
++    const bool resourceFound = GetResourceCacheEntry(fileName, rc);
++#if defined(__EMSCRIPTEN__)
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left resource lookup returned found=%d\n", resourceFound);
++    }
++#endif
++    if (resourceFound) {
++#if defined(__EMSCRIPTEN__)
++        if (traceEyeLeft) {
++            idLib::Printf("[web-port map] eye_left resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
++        }
++#endif
+         if (fs_debugResources.GetBool()) {
+             idLib::Printf("RES: loading file %s\n", rc.filename.c_str());
+         }
+@@ -2911,7 +2970,17 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+                 }
+                 buf = (byte*)Mem_Alloc(rc.length, TAG_TEMP);
+             }
++#if defined(__EMSCRIPTEN__)
++            if (traceEyeLeft) {
++                idLib::Printf("[web-port map] eye_left resource bytes read started length=%d\n", rc.length);
++            }
++#endif
+             file->Read((void*)buf, rc.length);
++#if defined(__EMSCRIPTEN__)
++            if (traceEyeLeft) {
++                idLib::Printf("[web-port map] eye_left resource bytes read returned\n");
++            }
++#endif
+ 
+             if (buf == resourceBufferPtr) {
+                 file->SetResourceBuffer(buf);
+@@ -2925,9 +2994,19 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+                 }
+             }
+         }
++#if defined(__EMSCRIPTEN__)
++        if (traceEyeLeft) {
++            idLib::Printf("[web-port map] eye_left resource file returned streaming=%d\n", file != NULL);
++        }
++#endif
+         return file;
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    if (traceEyeLeft) {
++        idLib::Printf("[web-port map] eye_left resource lookup returned missing\n");
++    }
++#endif
+     return NULL;
+ }
+ 
+

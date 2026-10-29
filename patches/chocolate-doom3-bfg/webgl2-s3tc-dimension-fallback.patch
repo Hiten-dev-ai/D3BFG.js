@@ -1,0 +1,47 @@
+diff --git a/neo/renderer/OpenGL/gl_Image.cpp b/neo/renderer/OpenGL/gl_Image.cpp
+--- a/neo/renderer/OpenGL/gl_Image.cpp
++++ b/neo/renderer/OpenGL/gl_Image.cpp
+@@ -38,12 +38,15 @@ Contains the Image implementation for OpenGL.
+ #if defined(__EMSCRIPTEN__)
+ #include "../DXT/DXTCodec.h"
+ 
+ static bool WebGLNeedsRGBAExpansion(const idImageOpts& opts)
+ {
++    const bool s3tcDimensionFallback = (opts.format == FMT_DXT1 || opts.format == FMT_DXT5)
++        && ((opts.width & 3) != 0 || (opts.height & 3) != 0);
+     return opts.colorFormat == CFM_GREEN_ALPHA
+-        || ((opts.format == FMT_DXT1 || opts.format == FMT_DXT5) && !glConfig.textureCompressionAvailable)
++        || ((opts.format == FMT_DXT1 || opts.format == FMT_DXT5)
++            && (!glConfig.textureCompressionAvailable || s3tcDimensionFallback))
+         || opts.format == FMT_ALPHA
+         || opts.format == FMT_L8A8
+         || opts.format == FMT_LUM8
+         || opts.format == FMT_INT8
+         || opts.format == FMT_X16
+@@ -233,20 +236,22 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int height, const void* pic, int pixelPitch) const
+         const size_t expandedSize = (size_t)width * height * 4;
+         webExpandedPixels = (byte*)Mem_Alloc((int)expandedSize, TAG_TEMP);
+         if (pic == NULL) {
+             memset(webExpandedPixels, 0, expandedSize);
+         } else if (IsCompressed()) {
+-            webDecodedPixels = (byte*)Mem_Alloc(sourceWidth * sourceHeight * 4, TAG_TEMP);
++            const int decodedWidth = (sourceWidth + 3) & ~3;
++            const int decodedHeight = (sourceHeight + 3) & ~3;
++            webDecodedPixels = (byte*)Mem_Alloc((int)((size_t)decodedWidth * decodedHeight * 4), TAG_TEMP);
+             idDxtDecoder decoder;
+             if (opts.format == FMT_DXT1) {
+-                decoder.DecompressImageDXT1((const byte*)pic, webDecodedPixels, sourceWidth, sourceHeight);
++                decoder.DecompressImageDXT1((const byte*)pic, webDecodedPixels, decodedWidth, decodedHeight);
+             } else if (opts.format == FMT_DXT5) {
+-                decoder.DecompressImageDXT5((const byte*)pic, webDecodedPixels, sourceWidth, sourceHeight);
++                decoder.DecompressImageDXT5((const byte*)pic, webDecodedPixels, decodedWidth, decodedHeight);
+             } else {
+                 idLib::FatalError("Unsupported compressed WebGL channel swizzle in %s", GetName());
+             }
+-            WebGLExpandTexturePixels(webDecodedPixels, FMT_RGBA8, opts.colorFormat, width, height, sourceWidth, webExpandedPixels);
++            WebGLExpandTexturePixels(webDecodedPixels, FMT_RGBA8, opts.colorFormat, width, height, decodedWidth, webExpandedPixels);
+         } else {
+             const int sourceRowPixels = pixelPitch != 0 ? pixelPitch : sourceWidth;
+             WebGLExpandTexturePixels((const byte*)pic, opts.format, opts.colorFormat, width, height, sourceRowPixels, webExpandedPixels);
+         }
+         uploadPixels = webExpandedPixels;

@@ -1,0 +1,276 @@
+diff --git a/neo/renderer/ImageManager.cpp b/neo/renderer/ImageManager.cpp
+--- a/neo/renderer/ImageManager.cpp
++++ b/neo/renderer/ImageManager.cpp
+@@ -365,6 +365,12 @@
+ idImage* idImageManager::ImageFromFile(const char* _name, textureFilter_t filter,
+     textureRepeat_t repeat, textureUsage_t usage, cubeFiles_t cubeMap)
+ {
++#if defined(__EMSCRIPTEN__)
++    const bool webTraceFloorGrate = _name != NULL && idStr::Icmp(_name, "textures/washroom/rffloorgrate01") == 0;
++    if (webTraceFloorGrate) {
++        common->Printf("[web-port image] floorgrate ImageFromFile enter name=%s filter=%d repeat=%d usage=%d cube=%d\n", _name, filter, repeat, usage, cubeMap);
++    }
++#endif
+ 
+     if (!_name || !_name[0] || idStr::Icmp(_name, "default") == 0 || idStr::Icmp(_name, "_default") == 0) {
+         declManager->MediaPrint("DEFAULTED\n");
+@@ -381,6 +387,11 @@
+     idStrStatic<MAX_OSPATH> name = _name;
+     name.Replace(".tga", "");
+     name.BackSlashesToSlashes();
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) {
++        common->Printf("[web-port image] floorgrate ImageFromFile normalized key=%s\n", name.c_str());
++    }
++#endif
+ 
+     //
+     // see if the image is already loaded, unless we
+@@ -390,6 +401,11 @@
+     for (int i = imageHash.First(hash); i != -1; i = imageHash.Next(i)) {
+         idImage* image = images[i];
+         if (name.Icmp(image->GetName()) == 0) {
++#if defined(__EMSCRIPTEN__)
++            if (webTraceFloorGrate) {
++                common->Printf("[web-port image] floorgrate image match index=%d name=%s existing=%d/%d/%d/%d requested=%d/%d/%d/%d loaded=%d\n", i, image->GetName(), image->filter, image->repeat, image->usage, image->cubeFiles, filter, repeat, usage, cubeMap, image->IsLoaded() ? 1 : 0);
++            }
++#endif
+             // the built in's, like _white and _flat always match the other options
+             if (name[0] == '_') {
+                 return image;
+@@ -399,11 +415,17 @@
+             }
+ 
+             if (image->filter != filter || image->repeat != repeat) {
++#if defined(__EMSCRIPTEN__)
++                if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate image match skipped due to filter/repeat\n");
++#endif
+                 // we might want to have the system reset these parameters on every bind and
+                 // share the image data
+                 continue;
+             }
+             if (image->usage != usage) {
++#if defined(__EMSCRIPTEN__)
++                if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate image match skipped due to usage\n");
++#endif
+                 // If an image is used differently then we need 2 copies of it because usage affects the way it's compressed and swizzled
+                 continue;
+             }
+@@ -413,9 +435,18 @@
+ 
+             if ((!insideLevelLoad || preloadingMapImages) && !image->IsLoaded()) {
+                 image->referencedOutsideLevelLoad = (!insideLevelLoad && !preloadingMapImages);
++#if defined(__EMSCRIPTEN__)
++                if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate matched image load started index=%d\n", i);
++#endif
+                 image->ActuallyLoadImage(false); // load is from front end
++#if defined(__EMSCRIPTEN__)
++                if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate matched image load returned index=%d loaded=%d\n", i, image->IsLoaded() ? 1 : 0);
++#endif
+                 declManager->MediaPrint("%ix%i %s (reload for mixed referneces)\n", image->GetUploadWidth(), image->GetUploadHeight(), image->GetName());
+             }
++#if defined(__EMSCRIPTEN__)
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate ImageFromFile existing image return index=%d\n", i);
++#endif
+             return image;
+         }
+     }
+@@ -423,6 +454,9 @@
+     //
+     // create a new image
+     //
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate no reusable image; allocation started\n");
++#endif
+     idImage* image = AllocImage(name);
+     image->cubeFiles = cubeMap;
+     image->usage = usage;
+@@ -434,12 +468,21 @@
+     // load it if we aren't in a level preload
+     if (!insideLevelLoad || preloadingMapImages) {
+         image->referencedOutsideLevelLoad = (!insideLevelLoad && !preloadingMapImages);
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate new image load started\n");
++#endif
+         image->ActuallyLoadImage(false); // load is from front end
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate new image load returned loaded=%d\n", image->IsLoaded() ? 1 : 0);
++#endif
+         declManager->MediaPrint("%ix%i %s\n", image->GetUploadWidth(), image->GetUploadHeight(), image->GetName());
+     } else {
+         declManager->MediaPrint("%s\n", image->GetName());
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate ImageFromFile new image return\n");
++#endif
+     return image;
+ }
+ 
+@@ -791,7 +834,14 @@
+                 const int imageStart = Sys_Milliseconds();
+                 common->Printf("[web-port map] image preload item started index=%d/%d name=%s\n", preloadImageIndex + 1, preloadImageCount, p.resourceName.c_str());
+ #endif
++#ifdef __EMSCRIPTEN__
++                const bool webTraceFloorGrate = idStr::Icmp(p.resourceName.c_str(), "textures/washroom/rffloorgrate01") == 0;
++                if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate preload call index=%d/%d filter=%d repeat=%d usage=%d cube=%d\n", preloadImageIndex + 1, preloadImageCount, p.imgData.filter, p.imgData.repeat, p.imgData.usage, p.imgData.cubeMap);
++#endif
+                 globalImages->ImageFromFile(p.resourceName, (textureFilter_t)p.imgData.filter, (textureRepeat_t)p.imgData.repeat, (textureUsage_t)p.imgData.usage, (cubeFiles_t)p.imgData.cubeMap);
++#ifdef __EMSCRIPTEN__
++                if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate preload call returned index=%d/%d\n", preloadImageIndex + 1, preloadImageCount);
++#endif
+ #ifdef __EMSCRIPTEN__
+                 const int imageElapsed = Sys_Milliseconds() - imageStart;
+                 preloadImageIndex++;
+diff --git a/neo/renderer/Image_load.cpp b/neo/renderer/Image_load.cpp
+--- a/neo/renderer/Image_load.cpp
++++ b/neo/renderer/Image_load.cpp
+@@ -290,17 +290,25 @@
+ #if defined(__EMSCRIPTEN__)
+     const bool webTraceEyeLeft = idStr::Icmp(GetName(), "guis/assets/mainmenu/eye_left") == 0;
+     const bool webTraceHudB = idStr::Icmp(GetName(), "guis/assets/hud/controller/xb360/b") == 0;
++    const bool webTraceFloorGrate = idStr::Icmp(GetName(), "textures/washroom/rffloorgrate01") == 0;
+     if (webTraceEyeLeft) {
+         common->Printf("[web-port trace] eye_left ActuallyLoadImage started\n");
+     }
+     if (webTraceHudB) {
+         common->Printf("[web-port trace] hud_b ActuallyLoadImage started\n");
+     }
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate ActuallyLoadImage enter fromBackEnd=%d\n", fromBackEnd ? 1 : 0);
+ #endif
+ 
+     // this is the ONLY place generatorFunction will ever be called
+     if (generatorFunction) {
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generator started\n");
++#endif
+         generatorFunction(this);
++#if defined(__EMSCRIPTEN__)
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generator returned\n");
++#endif
+         return;
+     }
+ 
+@@ -320,30 +328,52 @@
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read started\n");
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source metadata read started\n");
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source metadata read started\n");
+ #endif
+             R_LoadImageProgram(GetName(), NULL, NULL, NULL, &sourceFileTime, &usage);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read returned\n");
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source metadata read returned\n");
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source metadata read returned\n");
+ #endif
+         }
+     }
+ 
+     // Figure out opts.colorFormat and opts.format so we can make sure the binary image is up to date
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate derive options started\n");
++#endif
+     DeriveOpts();
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate derive options returned\n");
++#endif
+ 
+     idStrStatic<MAX_OSPATH> generatedName = GetName();
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated name started\n");
++#endif
+     GetGeneratedName(generatedName, usage, cubeFiles);
+-
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated name returned value=%s\n", generatedName.c_str());
++#endif
++
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image object construction started\n");
++#endif
+     idBinaryImage im(generatedName);
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image object construction returned\n");
++#endif
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read started\n");
+     if (webTraceHudB) common->Printf("[web-port trace] hud_b generated cache read started generated=%s\n", generatedName.c_str());
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache read started\n");
+ #endif
+     binaryFileTime = im.LoadFromGeneratedFile(sourceFileTime);
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
+     if (webTraceHudB) common->Printf("[web-port trace] hud_b generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
+ #endif
+ 
+     // BFHACK, do not want to tweak on buildgame so catch these images here
+@@ -427,11 +457,13 @@
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read started\n");
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source pixels read started name=%s\n", GetName());
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source pixels read started name=%s\n", GetName());
+ #endif
+             R_LoadImageProgram(GetName(), &pic, &width, &height, &sourceFileTime, &usage);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
+ #endif
+ 
+             if (pic == NULL) {
+@@ -459,38 +491,51 @@
+             DeriveOpts();
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left binary image build started width=%d height=%d\n", width, height);
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image build started width=%d height=%d\n", width, height);
+ #endif
+             im.Load2DFromMemory(opts.width, opts.height, pic, opts.numLevels, opts.format, opts.colorFormat, opts.gammaMips);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left binary image build returned\n");
++            if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image build returned\n");
+ #endif
+ 
+             Mem_Free(pic);
+         }
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache write started\n");
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache write started\n");
+ #endif
+         binaryFileTime = im.WriteGeneratedFile(sourceFileTime);
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache write returned\n");
+-#endif
+-    }
+-
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache write returned\n");
++#endif
++    }
++
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU image allocation started\n");
++#endif
+     AllocImage();
++#if defined(__EMSCRIPTEN__)
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU image allocation returned\n");
++#endif
+ 
+     for (int i = 0; i < im.NumImages(); i++) {
+         const bimageImage_t& img = im.GetImageHeader(i);
+         const byte* data = im.GetImageData(i);
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left GPU upload started level=%d size=%dx%d\n", img.level, img.width, img.height);
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU upload started level=%d size=%dx%d\n", img.level, img.width, img.height);
+ #endif
+         SubImageUpload(img.level, 0, 0, img.destZ, img.width, img.height, data);
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left GPU upload returned level=%d\n", img.level);
++        if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU upload returned level=%d\n", img.level);
+ #endif
+     }
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left ActuallyLoadImage returned\n");
++    if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate ActuallyLoadImage returned\n");
+ #endif
+ }
+ 

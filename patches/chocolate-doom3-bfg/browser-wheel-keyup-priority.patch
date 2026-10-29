@@ -1,0 +1,40 @@
+--- a/neo/sys/sdl/sdl_events.cpp
++++ b/neo/sys/sdl/sdl_events.cpp
+@@ -760,6 +760,18 @@
+     int key;
+ 
+     static const sysEvent_t res_none = { SE_NONE, 0, 0, 0, NULL };
++    // A wheel notch is a tap, not a held key. Return its key-up before text,
++    // controller, or the next SDL event can delay the menu repeater release.
++#if SDL_VERSION_ATLEAST(2, 0, 0)
++    static int mwheelRel = 0;
++    if (mwheelRel) {
++        res.evType = SE_KEY;
++        res.evValue = mwheelRel;
++        res.evValue2 = 0;
++        mwheelRel = 0;
++        return res;
++    }
++#endif
+ 
+ #if SDL_VERSION_ATLEAST(2, 0, 0)
+     if (hasPendingControllerEvent) {
+@@ -785,18 +797,6 @@
+ 
+         return res;
+     }
+-
+-    // DG: fake a "mousewheel not pressed anymore" event for SDL2
+-    // so scrolling in menus stops after one step
+-    static int mwheelRel = 0;
+-    if (mwheelRel) {
+-        res.evType = SE_KEY;
+-        res.evValue = mwheelRel;
+-        res.evValue2 = 0; // "not pressed anymore"
+-        mwheelRel = 0;
+-        return res;
+-    }
+-    // DG end
+ 
+ #endif
+ 

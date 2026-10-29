@@ -1,0 +1,60 @@
+diff --git a/neo/renderer/OpenGL/gl_Image.cpp b/neo/renderer/OpenGL/gl_Image.cpp
+--- a/neo/renderer/OpenGL/gl_Image.cpp
++++ b/neo/renderer/OpenGL/gl_Image.cpp
+@@ -82,8 +82,9 @@ static void WebGLExpandTexturePixels(const byte* source, textureFormat_t format, textureColor_t colorFormat,
+                 case FMT_L8A8:
+                     green = src[1];
+                     break;
+                 case FMT_RGB565: {
+-                    const unsigned short pixel = ((const unsigned short*)src)[0];
++                    // BinaryImage stores packed 565 pixels in big-endian byte order.
++                    const unsigned short pixel = (unsigned short)(((unsigned short)src[0] << 8) | src[1]);
+                     green = (byte)((((pixel >> 5) & 0x3fu) * 255u + 31u) / 63u);
+                 } break;
+                 case FMT_X16:
+@@ -163,5 +164,6 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int height, const void* pic, int pixelPitch) const
+ #if defined(__EMSCRIPTEN__)
+     const bool webExpandTexture = WebGLNeedsRGBAExpansion(opts);
++    const bool webSwapRGB565 = opts.format == FMT_RGB565 && !webExpandTexture;
+     const int sourceWidth = width;
+     const int sourceHeight = height;
+ #endif
+@@ -210,4 +212,5 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int height, const void* pic, int pixelPitch) const
+ #if defined(__EMSCRIPTEN__)
+         && !webExpandTexture
++        && !webSwapRGB565
+ #endif
+         ) {
+@@ -224,5 +227,6 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int height, const void* pic, int pixelPitch) const
+     byte* webExpandedPixels = NULL;
+     byte* webDecodedPixels = NULL;
++    byte* webSwappedPixels = NULL;
+     const void* uploadPixels = pic;
+ #if defined(__EMSCRIPTEN__)
+     if (webExpandTexture) {
+@@ -244,5 +248,19 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int height, const void* pic, int pixelPitch) const
+         }
+         uploadPixels = webExpandedPixels;
+     }
++    if (webSwapRGB565 && pic != NULL) {
++        const int sourceRowPixels = pixelPitch != 0 ? pixelPitch : width;
++        webSwappedPixels = (byte*)Mem_Alloc((int)((size_t)width * height * 2), TAG_TEMP);
++        const byte* sourcePixels = (const byte*)pic;
++        for (int row = 0; row < height; ++row) {
++            for (int column = 0; column < width; ++column) {
++                const size_t sourceIndex = ((size_t)row * sourceRowPixels + column) * 2;
++                const size_t destinationIndex = ((size_t)row * width + column) * 2;
++                webSwappedPixels[destinationIndex + 0] = sourcePixels[sourceIndex + 1];
++                webSwappedPixels[destinationIndex + 1] = sourcePixels[sourceIndex + 0];
++            }
++        }
++        uploadPixels = webSwappedPixels;
++    }
+ #endif
+     if (IsCompressed()
+@@ -300,4 +319,5 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int height, const void* pic, int pixelPitch) const
+     if (webExpandedPixels != NULL) Mem_Free(webExpandedPixels);
+     if (webDecodedPixels != NULL) Mem_Free(webDecodedPixels);
++    if (webSwappedPixels != NULL) Mem_Free(webSwappedPixels);
+ #endif
+ }

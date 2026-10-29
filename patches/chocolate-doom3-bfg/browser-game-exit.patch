@@ -1,0 +1,14 @@
+--- a/neo/sys/posix/posix_main.cpp
++++ b/neo/sys/posix/posix_main.cpp
+@@ -1294,5 +1294,11 @@
+ void Sys_Quit()
+ {
++#ifdef __EMSCRIPTEN__
++    MAIN_THREAD_EM_ASM({
++        if (document.pointerLockElement) document.exitPointerLock();
++        document.dispatchEvent(new Event('doom3-game-exit'));
++    });
++#endif
+     Posix_Exit(EXIT_SUCCESS);
+ }
+ 

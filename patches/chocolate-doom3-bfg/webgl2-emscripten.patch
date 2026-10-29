@@ -1,0 +1,3051 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6e8afa6..cc719f4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -9,6 +9,16 @@ option(OPENAL "Use OpenAL soft instead of XAudio2" OFF)
+ option(FFMPEG "Use FMPEG to render Bink videos" OFF)
+ 
+ option(USE_OPENGL_ES "Use OpenGL ES instead of Desktop GL" OFF)
++set(
++    DOOM3BFG_WEB_OUTPUT_DIR
++    "${CMAKE_CURRENT_SOURCE_DIR}/../../web/public/engine"
++    CACHE PATH "Output directory for the Emscripten engine module"
++)
++option(
++    DOOM3BFG_WEB_WORKER_PROFILE
++    "Build the experimental pthread/OffscreenCanvas browser profile"
++    OFF
++)
+ 
+ if(UNIX)
+     set(OPENAL TRUE)
+@@ -38,6 +48,11 @@ if(USE_OPENGL_ES)
+     add_definitions(-DUSE_GLES2=1)
+ endif()
+ 
++if(EMSCRIPTEN AND DOOM3BFG_WEB_WORKER_PROFILE)
++    # Every linked object, including idlib, must use wasm atomics/bulk memory.
++    add_compile_options("-pthread")
++endif()
++
+ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+     add_definitions(-pipe)
+     #add_definitions(-Wall)
+@@ -1414,27 +1429,28 @@ else()
+         set_source_files_properties(
+             ${src_file}
+             PROPERTIES
+-                COMPILE_FLAGS
+-                    "-include ${CMAKE_CURRENT_SOURCE_DIR}/neo/idlib/precompiled.h"
++                COMPILE_OPTIONS
++                    "-include;${CMAKE_CURRENT_SOURCE_DIR}/neo/idlib/precompiled.h"
+         )
+     endforeach()
+ 
+     # precompiled magic for GCC/clang, adapted from https://gist.github.com/573926
+     string(TOUPPER "CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}" _flags_var_name)
+     set(_compiler_FLAGS ${${_flags_var_name}})
++    separate_arguments(_compiler_FLAGS)
++
+     get_directory_property(_directory_flags INCLUDE_DIRECTORIES)
+     foreach(item ${_directory_flags})
+-        list(APPEND _compiler_FLAGS " -I${item}")
++        list(APPEND _compiler_FLAGS -I "${item}")
+     endforeach(item)
+ 
+     get_directory_property(_directory_flags DEFINITIONS)
+     list(APPEND _compiler_FLAGS ${_directory_flags})
+-    separate_arguments(_compiler_FLAGS)
+ 
+     # we need to recreate the precompiled header for Doom3BFG
+     # (i.e. can't use the one created for idlib before)
+     # because some definitions (e.g. -D__IDLIB__ -D__DOOM_DLL__) differ
+-    if(APPLE)
++    if(APPLE OR EMSCRIPTEN)
+         add_custom_target(precomp_header_rbdoom3bfg)
+     else()
+     add_custom_target(
+@@ -1468,6 +1484,58 @@ else()
+ 
+     add_executable(Doom3BFG WIN32 ${DOOM_SOURCES})
+ 
++    if(EMSCRIPTEN)
++        target_compile_options(Doom3BFG PRIVATE "-sUSE_SDL=2")
++        if(DOOM3BFG_WEB_WORKER_PROFILE)
++            target_compile_options(Doom3BFG PRIVATE "-pthread")
++        endif()
++        target_link_options(
++            Doom3BFG
++            PRIVATE
++                "-sUSE_SDL=2"
++                "-lopenal"
++                "-sMIN_WEBGL_VERSION=2"
++                "-sMAX_WEBGL_VERSION=2"
++                "-sFULL_ES3=1"
++                "-sMODULARIZE=1"
++                "-sEXPORT_ES6=1"
++                "-sEXPORT_NAME=createDoom3BfgEngine"
++                "-sALLOW_MEMORY_GROWTH=1"
++                "-sENVIRONMENT=web"
++                "-sEXIT_RUNTIME=0"
++        )
++        if(DOOM3BFG_WEB_WORKER_PROFILE)
++            target_link_options(
++                Doom3BFG
++                PRIVATE
++                    "-pthread"
++                    "-sPROXY_TO_PTHREAD=1"
++                    "-sPTHREAD_POOL_SIZE=1"
++                    "-sASYNCIFY=1"
++                    "-sSTACK_SIZE=2097152"
++                    "-sDEFAULT_PTHREAD_STACK_SIZE=2097152"
++                    "-sOFFSCREENCANVAS_SUPPORT=1"
++                    "-sFORCE_FILESYSTEM=1"
++                    "-lworkerfs.js"
++                    "-lidbfs.js"
++            )
++            # Re-link when the patched Emscripten worker runtime changes.
++            set_property(
++                TARGET Doom3BFG APPEND PROPERTY LINK_DEPENDS
++                    "${CMAKE_CURRENT_SOURCE_DIR}/../../patches/emsdk/workerfs-pthread-staged-files.patch"
++                    "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/apply-emsdk-patches.ps1"
++            )
++        endif()
++        target_link_libraries(Doom3BFG PRIVATE idlib)
++        set_target_properties(
++            Doom3BFG
++            PROPERTIES
++                OUTPUT_NAME doom3_bfg_web
++                SUFFIX ".js"
++                RUNTIME_OUTPUT_DIRECTORY "${DOOM3BFG_WEB_OUTPUT_DIR}"
++        )
++    endif()
++
+     # make sure precompiled header is created before executable is compiled
+     add_dependencies(Doom3BFG precomp_header_rbdoom3bfg)
+ 
+@@ -1509,6 +1577,7 @@ else()
+         )
+     endif()
+ 
++
+     if(APPLE)
+         find_library(OPENGL_FRAMEWORK OpenGL)
+         target_link_libraries(
+diff --git a/neo/framework/Common.cpp b/neo/framework/Common.cpp
+index 34911af..1cf6841 100644
+--- a/neo/framework/Common.cpp
++++ b/neo/framework/Common.cpp
+@@ -1203,8 +1203,10 @@ void idCommonLocal::Init(int argc, const char* const* argv, const char* cmdline)
+ 
+         // initialize the renderSystem data structures
+         renderSystem->Init();
++        idLib::Printf("[web-port trace] Common after renderSystem Init\n");
+ 
+         whiteMaterial = declManager->FindMaterial("_white");
++        idLib::Printf("[web-port trace] Common white material ready\n");
+ 
+         if (idStr::Icmp(sys_lang.GetString(), ID_LANG_FRENCH) == 0) {
+             // If the user specified french, we show french no matter what SKU
+@@ -1216,6 +1218,7 @@ void idCommonLocal::Init(int argc, const char* const* argv, const char* cmdline)
+             // Otherwise show it in english
+             splashScreen = declManager->FindMaterial("guis/assets/splash/legal_english");
+         }
++        idLib::Printf("[web-port trace] Common legal splash material ready\n");
+ 
+         const int legalMinTime = 4000;
+         const bool showVideo = (!com_skipIntroVideos.GetBool() && fileSystem->UsingResourceFiles());
+@@ -1230,33 +1233,41 @@ void idCommonLocal::Init(int argc, const char* const* argv, const char* cmdline)
+             RenderSplash();
+             RenderSplash();
+         }
++        idLib::Printf("[web-port trace] Common legal splash rendered\n");
+ 
+         int legalStartTime = Sys_Milliseconds();
+         declManager->Init2();
++        idLib::Printf("[web-port trace] Common decl Init2 complete\n");
+ 
+         // initialize string database so we can use it for loading messages
+         InitLanguageDict();
++        idLib::Printf("[web-port trace] Common language dictionary complete\n");
+ 
+         // spawn the game thread, even if we are going to run without SMP
+         // one meg stack, because it can parse decls from gui surfaces (unfortunately)
+         // use a lower priority so job threads can run on the same core
+         gameThread.StartWorkerThread("Game/Draw", CORE_1B, THREAD_BELOW_NORMAL, 0x100000);
++        idLib::Printf("[web-port trace] Common game thread started\n");
+         // boost this thread's priority, so it will prevent job threads from running while
+         // the render back end still has work to do
+ 
+         // init the user command input code
+         usercmdGen->Init();
++        idLib::Printf("[web-port trace] Common usercmd input initialized\n");
+ 
+         Sys_SetRumble(0, 0, 0);
++        idLib::Printf("[web-port trace] Common rumble initialized\n");
+ 
+         // initialize the user interfaces
+         uiManager->Init();
++        idLib::Printf("[web-port trace] Common UI manager initialized\n");
+ 
+         // startup the script debugger
+         // DebuggerServerInit();
+ 
+         // load the game dll
+         LoadGameDLL();
++        idLib::Printf("[web-port trace] Common game module loaded\n");
+ 
+         // On the PC touch them all so they get included in the resource build
+         if (!fileSystem->UsingResourceFiles()) {
+@@ -1514,6 +1525,9 @@ idCommonLocal::CreateMainMenu
+ */
+ void idCommonLocal::CreateMainMenu()
+ {
++#if defined(__EMSCRIPTEN__)
++    idLib::Printf("[web-port menu] CreateMainMenu game=%p\n", game);
++#endif
+     if (game != NULL) {
+         // note which media we are going to need to load
+         declManager->BeginLevelLoad();
+@@ -1526,6 +1540,9 @@ void idCommonLocal::CreateMainMenu()
+         game->Shell_CreateMenu(false);
+         game->Shell_Show(true);
+         game->Shell_SyncWithSession();
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port menu] shell active=%d\n", game->Shell_IsActive() ? 1 : 0);
++#endif
+ 
+         // load
+         renderSystem->EndLevelLoad();
+@@ -1585,7 +1602,14 @@ idCommonLocal::WaitForSessionState
+ */
+ bool idCommonLocal::WaitForSessionState(idSession::sessionState_t desiredState)
+ {
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port session] Wait begin target=%d current=%s\n", (int)desiredState, session->GetStateString());
++    int webPortLastWaitLog = Sys_Milliseconds();
++#endif
+     if (session->GetState() == desiredState) {
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port session] Wait immediate success target=%d\n", (int)desiredState);
++#endif
+         return true;
+     }
+ 
+@@ -1594,12 +1618,26 @@ bool idCommonLocal::WaitForSessionState(idSession::sessionState_t desiredState)
+ 
+         idSession::sessionState_t sessionState = session->GetState();
+         if (sessionState == desiredState) {
++#ifdef __EMSCRIPTEN__
++            common->Printf("[web-port session] Wait reached target=%d state=%s\n", (int)desiredState, session->GetStateString());
++#endif
+             return true;
+         }
+         if (sessionState != idSession::LOADING && sessionState != idSession::SEARCHING && sessionState != idSession::CONNECTING && sessionState != idSession::BUSY && sessionState != desiredState) {
++#ifdef __EMSCRIPTEN__
++            common->Warning("[web-port session] WaitForSessionState target=%d aborted in %s\n", (int)desiredState, session->GetStateString());
++#endif
+             return false;
+         }
+ 
++#ifdef __EMSCRIPTEN__
++        const int waitTime = Sys_Milliseconds();
++        if (waitTime - webPortLastWaitLog >= 1000) {
++            common->Printf("[web-port session] Wait still pending target=%d current=%s\n", (int)desiredState, session->GetStateString());
++            webPortLastWaitLog = waitTime;
++        }
++#endif
++
+         Sys_Sleep(10);
+     }
+ }
+diff --git a/neo/framework/DeclManager.cpp b/neo/framework/DeclManager.cpp
+index dd4bd15..0a0ede8 100644
+--- a/neo/framework/DeclManager.cpp
++++ b/neo/framework/DeclManager.cpp
+@@ -260,6 +260,11 @@ idCVar idDeclManagerLocal::decl_show("decl_show", "0", CVAR_SYSTEM, "set to 1 to
+ 
+ idDeclManagerLocal declManagerLocal;
+ idDeclManager* declManager = &declManagerLocal;
++#if defined(__EMSCRIPTEN__)
++void* webPortTraceDeclMutexHandle = NULL;
++volatile unsigned long webPortTraceDeclMutexOwner = 0;
++volatile unsigned long webPortTraceDeclMutexDepth = 0;
++#endif
+ 
+ /*
+ ====================================================================================
+@@ -1045,6 +1049,9 @@ idDeclManagerLocal::Init
+ */
+ void idDeclManagerLocal::Init()
+ {
++#if defined(__EMSCRIPTEN__)
++    webPortTraceDeclMutexHandle = mutex.GetHandleForWebTrace();
++#endif
+ 
+     common->Printf("----- Initializing Decls -----\n");
+ 
+@@ -1386,8 +1393,24 @@ External users will always cause the decl to be parsed before returning
+ const idDecl* idDeclManagerLocal::FindType(declType_t type, const char* name, bool makeDefault)
+ {
+     idDeclLocal* decl;
++#if defined(__EMSCRIPTEN__)
++    const bool webPortTrace = type == DECL_MATERIAL && name && idStr::Icmp(name, "lights/defaultPointLight") == 0;
++    const bool webFontTrace = type == DECL_MATERIAL && name && idStr::Icmpn(name, "newfonts/", 9) == 0;
++    if (webFontTrace) common->Printf("[web-port trace] font decl FindType begin '%s'\n", name);
++    if (webPortTrace) {
++        common->Printf("[web-port trace] FindType defaultPointLight enter\n");
++    }
++#endif
+ 
+     idScopedCriticalSection cs(mutex);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl locked\n");
++#endif
++#if defined(__EMSCRIPTEN__)
++    if (webPortTrace) {
++        common->Printf("[web-port trace] FindType defaultPointLight locked\n");
++    }
++#endif
+ 
+     if (!name || !name[0]) {
+         name = "_emptyName";
+@@ -1395,20 +1418,52 @@ const idDecl* idDeclManagerLocal::FindType(declType_t type, const char* name, bo
+     }
+ 
+     decl = FindTypeWithoutParsing(type, name, makeDefault);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl lookup complete %p\n", decl);
++#endif
++#if defined(__EMSCRIPTEN__)
++    if (webPortTrace) {
++        common->Printf("[web-port trace] FindType defaultPointLight search complete\n");
++    }
++#endif
+     if (!decl) {
+         return NULL;
+     }
+ 
+     decl->AllocateSelf();
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl AllocateSelf complete\n");
++#endif
+ 
+     // if it hasn't been parsed yet, parse it now
+     if (decl->declState == DS_UNPARSED) {
++#if defined(__EMSCRIPTEN__)
++        if (webFontTrace) common->Printf("[web-port trace] font decl parse check\n");
++#endif
++#if defined(__EMSCRIPTEN__)
++        if (webPortTrace) {
++            common->Printf("[web-port trace] FindType parse thread=%lu main=%d\n", (unsigned long)pthread_self(), idLib::IsMainThread() ? 1 : 0);
++        }
++#endif
+         if (!idLib::IsMainThread()) {
+             // we can't load images from a background thread on OpenGL,
+             // the renderer on the main thread should parse it if needed
+             idLib::Error("Attempted to load %s decl '%s' from game thread!", GetDeclNameFromType(type), name);
+         }
++        #if defined(__EMSCRIPTEN__)
++        if (webPortTrace) {
++            common->Printf("[web-port trace] FindType defaultPointLight parse begin\n");
++        }
++        #endif
+         decl->ParseLocal();
++#if defined(__EMSCRIPTEN__)
++        if (webFontTrace) common->Printf("[web-port trace] font decl ParseLocal complete\n");
++#endif
++        #if defined(__EMSCRIPTEN__)
++        if (webPortTrace) {
++            common->Printf("[web-port trace] FindType defaultPointLight parse complete\n");
++        }
++        #endif
+     }
+ 
+     // mark it as referenced
+@@ -2014,10 +2069,25 @@ idDeclLocal* idDeclManagerLocal::FindTypeWithoutParsing(declType_t type, const c
+ 
+     char canonicalName[MAX_STRING_CHARS];
+ 
++#if defined(__EMSCRIPTEN__)
++    const bool webFontTrace = type == DECL_MATERIAL && name && idStr::Icmpn(name, "newfonts/", 9) == 0;
++    if (webFontTrace) common->Printf("[web-port trace] font decl canonical begin\n");
++#endif
++
+     MakeNameCanonical(name, canonicalName, sizeof(canonicalName));
+ 
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl canonical complete '%s'\n", canonicalName);
++#endif
++
+     // see if it already exists
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl hash begin\n");
++#endif
+     hash = hashTables[typeIndex].GenerateKey(canonicalName, false);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl hash=%d\n", hash);
++#endif
+     for (i = hashTables[typeIndex].First(hash); i >= 0; i = hashTables[typeIndex].Next(i)) {
+         if (linearLists[typeIndex][i]->name.Icmp(canonicalName) == 0) {
+             // only print these when decl_show is set to 2, because it can be a lot of clutter
+@@ -2673,6 +2743,10 @@ idDeclLocal::ParseLocal
+ void idDeclLocal::ParseLocal()
+ {
+     bool generatedDefaultText = false;
++#if defined(__EMSCRIPTEN__)
++    const bool webFontTrace = type == DECL_MATERIAL && name.Find("newfonts/", false) == 0;
++    if (webFontTrace) common->Printf("[web-port trace] font ParseLocal begin\n");
++#endif
+ 
+     AllocateSelf();
+ 
+@@ -2685,6 +2759,9 @@ void idDeclLocal::ParseLocal()
+     if (textSource == NULL) {
+         generatedDefaultText = self->SetDefaultText();
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font SetDefaultText complete generated=%d\n", generatedDefaultText ? 1 : 0);
++#endif
+ 
+     // indent for DEFAULTED or media file references
+     declManagerLocal.indent++;
+@@ -2701,7 +2778,13 @@ void idDeclLocal::ParseLocal()
+     // parse
+     char* declText = (char*)_alloca((GetTextLength() + 1) * sizeof(char));
+     GetText(declText);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl Parse begin\n");
++#endif
+     self->Parse(declText, GetTextLength(), true);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font decl Parse complete\n");
++#endif
+ 
+     // free generated text
+     if (generatedDefaultText) {
+diff --git a/neo/framework/common_frame.cpp b/neo/framework/common_frame.cpp
+index dece68c..5e2b32c 100644
+--- a/neo/framework/common_frame.cpp
++++ b/neo/framework/common_frame.cpp
+@@ -34,6 +34,14 @@ If you have questions concerning this license or the applicable additional terms
+ #include "../renderer/Image.h"
+ #include "../renderer/ImageOpts.h"
+ 
++#if defined(__EMSCRIPTEN__)
++extern int WebPortCountRenderCommands(const void* commandHead, bool viewOnly);
++extern int WebPortGetRenderCommandId(const void* commandHead, int commandIndex);
++extern void WebPortGetRenderViewStats(const void* commandHead, int* drawSurfs, int* viewportWidth, int* viewportHeight);
++extern int WebPortGetBackendExecutionCount();
++extern int WebPortGetSwapExecutionCount();
++#endif
++
+ // RB begin
+ #if defined(USE_DOOMCLASSIC)
+ #include "../../doomclassic/doom/doomlib.h"
+@@ -400,6 +408,11 @@ void idCommonLocal::Frame()
+ 
+         // This is the only place this is incremented
+         idLib::frameNumber++;
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            common->Printf("[web-port frame] begin frame=%d\n", idLib::frameNumber);
++        }
++#endif
+ 
+         // allow changing SIMD usage on the fly
+         if (com_forceGenericSIMD.IsModified()) {
+@@ -496,6 +509,11 @@ void idCommonLocal::Frame()
+             // input latency
+             renderSystem->SwapCommandBuffers_FinishRendering(&time_frontend, &time_backend, &time_shadows, &time_gpu);
+         }
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            common->Printf("[web-port frame] render sync complete frame=%d\n", idLib::frameNumber);
++        }
++#endif
+         frameTiming.finishSyncTime = Sys_Microseconds();
+ 
+         //--------------------------------------------
+@@ -607,6 +625,11 @@ void idCommonLocal::Frame()
+         session->UpdateSignInManager();
+         session->Pump();
+         session->ProcessSnapAckQueue();
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            common->Printf("[web-port frame] session pump complete frame=%d state=%d\n", idLib::frameNumber, (int)session->GetState());
++        }
++#endif
+ 
+         if (session->GetState() == idSession::LOADING) {
+             // If the session reports we should be loading a map, load it!
+@@ -683,12 +706,32 @@ void idCommonLocal::Frame()
+ 
+         // start the game / draw command generation thread going in the background
+         gameReturn_t ret = gameThread.RunGameAndDraw(numGameFrames, userCmdMgr, IsClient(), gameFrame - numGameFrames);
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            common->Printf("[web-port frame] game draw queued frame=%d numGameFrames=%d\n", idLib::frameNumber, numGameFrames);
++        }
++#endif
+ 
+         if (!com_smp.GetBool()) {
+             // in non-smp mode, run the commands we just generated, instead of
+             // frame-delayed ones from a background thread
+             renderCommands = renderSystem->SwapCommandBuffers_FinishCommandBuffers();
+         }
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            int webPortDrawSurfs = 0;
++            int webPortViewportWidth = 0;
++            int webPortViewportHeight = 0;
++            WebPortGetRenderViewStats(renderCommands, &webPortDrawSurfs, &webPortViewportWidth, &webPortViewportHeight);
++            common->Printf("[web-port frame] command list ready frame=%d buffer=%p commands=%d views=%d ids=%d,%d,%d surfs=%d viewport=%dx%d smp=%d shell=%d client=%d\n",
++                idLib::frameNumber, renderCommands,
++                WebPortCountRenderCommands(renderCommands, false), WebPortCountRenderCommands(renderCommands, true),
++                WebPortGetRenderCommandId(renderCommands, 0), WebPortGetRenderCommandId(renderCommands, 1), WebPortGetRenderCommandId(renderCommands, 2),
++                webPortDrawSurfs, webPortViewportWidth, webPortViewportHeight,
++                com_smp.GetBool() ? 1 : 0, game && game->Shell_IsActive() ? 1 : 0,
++                game ? game->GetLocalClientNum() : -2);
++        }
++#endif
+ 
+         //----------------------------------------
+         // Run the render back end, getting the GPU busy with new commands
+@@ -696,6 +739,12 @@ void idCommonLocal::Frame()
+         //----------------------------------------
+         frameTiming.startRenderTime = Sys_Microseconds();
+         renderSystem->RenderCommandBuffers(renderCommands);
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            common->Printf("[web-port frame] backend submitted frame=%d executions=%d swaps=%d\n",
++                idLib::frameNumber, WebPortGetBackendExecutionCount(), WebPortGetSwapExecutionCount());
++        }
++#endif
+         if (com_sleepRender.GetInteger() > 0) {
+             // debug tool to test frame adaption
+             Sys_Sleep(com_sleepRender.GetInteger());
+@@ -705,6 +754,11 @@ void idCommonLocal::Frame()
+         // make sure the game / draw thread has completed
+         // This may block if the game is taking longer than the render back end
+         gameThread.WaitForThread();
++#if defined(__EMSCRIPTEN__)
++        if (idLib::frameNumber <= 2) {
++            common->Printf("[web-port frame] game draw finished frame=%d\n", idLib::frameNumber);
++        }
++#endif
+ 
+         // Send local usermds to the server.
+         // This happens after the game frame has run so that prediction data is up to date.
+diff --git a/neo/idlib/CMakeLists.txt b/neo/idlib/CMakeLists.txt
+index 469f710..61ee18d 100644
+--- a/neo/idlib/CMakeLists.txt
++++ b/neo/idlib/CMakeLists.txt
+@@ -113,8 +113,8 @@ else()
+         set_source_files_properties(
+             ${src_file}
+             PROPERTIES
+-                COMPILE_FLAGS
+-                    "-include ${CMAKE_CURRENT_SOURCE_DIR}/precompiled.h"
++                COMPILE_OPTIONS
++                    "-include;${CMAKE_CURRENT_SOURCE_DIR}/precompiled.h"
+         )
+     endforeach()
+ 
+@@ -123,17 +123,17 @@ else()
+     # precompiled magic for GCC/clang, adapted from https://gist.github.com/573926
+     string(TOUPPER "CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}" _flags_var_name)
+     set(_compiler_FLAGS ${${_flags_var_name}})
++    separate_arguments(_compiler_FLAGS)
++
+     get_directory_property(_directory_flags INCLUDE_DIRECTORIES)
+     foreach(item ${_directory_flags})
+-        list(APPEND _compiler_FLAGS " -I${item}")
++        list(APPEND _compiler_FLAGS -I "${item}")
+     endforeach(item)
+ 
+     get_directory_property(_directory_flags DEFINITIONS)
+     list(APPEND _compiler_FLAGS ${_directory_flags})
+ 
+-    separate_arguments(_compiler_FLAGS)
+-
+-    if(APPLE)
++    if(APPLE OR EMSCRIPTEN)
+         add_custom_target(precomp_header_idlib)
+     else()
+     add_custom_target(
+diff --git a/neo/idlib/Lib.cpp b/neo/idlib/Lib.cpp
+index 57bacee..ee65099 100644
+--- a/neo/idlib/Lib.cpp
++++ b/neo/idlib/Lib.cpp
+@@ -50,6 +50,9 @@ idFileSystem* idLib::fileSystem = NULL;
+ int idLib::frameNumber = 0;
+ bool idLib::mainThreadInitialized = 0;
+ ID_TLS idLib::isMainThread = 0;
++#if defined(__EMSCRIPTEN__)
++uintptr_t idLib::mainThreadID = 0;
++#endif
+ 
+ char idException::error[2048];
+ 
+@@ -65,6 +68,10 @@ void idLib::Init()
+ 
+     isMainThread = 1;
+     mainThreadInitialized = 1; // note that the thread-local isMainThread is now valid
++#if defined(__EMSCRIPTEN__)
++    mainThreadID = Sys_GetCurrentThreadID();
++    common->Printf("[web-port trace] idLib Init thread=%lu main=%d\n", (unsigned long)pthread_self(), isMainThread ? 1 : 0);
++#endif
+ 
+     // initialize little/big endian conversion
+     Swap_Init();
+diff --git a/neo/idlib/Lib.h b/neo/idlib/Lib.h
+index ee55dd5..ea61456 100644
+--- a/neo/idlib/Lib.h
++++ b/neo/idlib/Lib.h
+@@ -30,6 +30,10 @@ If you have questions concerning this license or the applicable additional terms
+ #define __LIB_H__
+ 
+ #include <stddef.h>
++#if defined(__EMSCRIPTEN__)
++#include <stdint.h>
++uintptr_t Sys_GetCurrentThreadID();
++#endif
+ 
+ /*
+ ===============================================================================
+@@ -49,6 +53,9 @@ class idLib {
+ private:
+     static bool mainThreadInitialized;
+     static ID_TLS isMainThread;
++#if defined(__EMSCRIPTEN__)
++    static uintptr_t mainThreadID;
++#endif
+ 
+ public:
+     static class idSys* sys;
+@@ -60,6 +67,17 @@ public:
+     static void Init();
+     static void ShutDown();
+ 
++#if defined(__EMSCRIPTEN__)
++    // The WebGL context can live on a worker pthread; treat its owner as the
++    // engine's main thread for declaration parsing that may touch GL resources.
++    static void SetCurrentThreadAsMain()
++    {
++        mainThreadID = Sys_GetCurrentThreadID();
++        isMainThread = 1;
++        mainThreadInitialized = 1;
++    }
++#endif
++
+     // wrapper to idCommon functions
+     static void Printf(VERIFY_FORMAT_STRING const char* fmt, ...) ID_STATIC_ATTRIBUTE_PRINTF(1, 2);
+     static void PrintfIf(const bool test, VERIFY_FORMAT_STRING const char* fmt, ...) ID_STATIC_ATTRIBUTE_PRINTF(2, 3);
+@@ -72,7 +90,11 @@ public:
+     // when called by startup code that happens before idLib::Init
+     static bool IsMainThread()
+     {
++#if defined(__EMSCRIPTEN__)
++        return (0 == mainThreadInitialized) || (Sys_GetCurrentThreadID() == mainThreadID);
++#else
+         return (0 == mainThreadInitialized) || (1 == isMainThread);
++#endif
+     }
+ };
+ 
+diff --git a/neo/idlib/Thread.h b/neo/idlib/Thread.h
+index 9a7487b..aa42071 100644
+--- a/neo/idlib/Thread.h
++++ b/neo/idlib/Thread.h
+@@ -56,6 +56,13 @@ public:
+         Sys_MutexUnlock(handle);
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    void* GetHandleForWebTrace()
++    {
++        return &handle;
++    }
++#endif
++
+ private:
+     mutexHandle_t handle;
+ 
+diff --git a/neo/idlib/precompiled.h b/neo/idlib/precompiled.h
+index 5dc5294..2e73079 100644
+--- a/neo/idlib/precompiled.h
++++ b/neo/idlib/precompiled.h
+@@ -44,6 +44,11 @@ If you have questions concerning this license or the applicable additional terms
+ // non-portable system services
+ #include "../sys/sys_public.h"
+ 
++#if defined(__EMSCRIPTEN__)
++// Str.h remaps snprintf/vsnprintf; load libc++ locale declarations first.
++#include <locale>
++#endif
++
+ // id lib
+ #include "../idlib/Lib.h"
+ 
+diff --git a/neo/idlib/sys/posix/posix_thread.cpp b/neo/idlib/sys/posix/posix_thread.cpp
+index 5745f6a..db01564 100644
+--- a/neo/idlib/sys/posix/posix_thread.cpp
++++ b/neo/idlib/sys/posix/posix_thread.cpp
+@@ -30,6 +30,13 @@ If you have questions concerning this license or the applicable additional terms
+ #pragma hdrstop
+ #include "../../precompiled.h"
+ 
++#if defined(__EMSCRIPTEN__)
++#include <stdio.h>
++extern void* webPortTraceDeclMutexHandle;
++extern volatile unsigned long webPortTraceDeclMutexOwner;
++extern volatile unsigned long webPortTraceDeclMutexDepth;
++#endif
++
+ #ifndef _WIN32
+ #include <sched.h>
+ #endif
+@@ -449,7 +456,14 @@ void Sys_MutexCreate(mutexHandle_t& handle)
+     pthread_mutexattr_t attr;
+ 
+     pthread_mutexattr_init(&attr);
++#if defined(__EMSCRIPTEN__)
++    // The WebAssembly main pthread has no POSIX kernel thread ID for musl's
++    // error-checking mutex owner validation. Keep the engine's lock semantics
++    // while avoiding false EPERM results from pthread_mutex_unlock.
++    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
++#else
+     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
++#endif
+     pthread_mutex_init(&handle, &attr);
+ 
+     pthread_mutexattr_destroy(&attr);
+@@ -472,12 +486,55 @@ Sys_MutexLock
+ */
+ bool Sys_MutexLock(mutexHandle_t& handle, bool blocking)
+ {
+-    if (pthread_mutex_trylock(&handle) != 0) {
+-        if (!blocking) {
+-            return false;
++    const int tryLockResult = pthread_mutex_trylock(&handle);
++#if defined(__EMSCRIPTEN__)
++    const bool traceDeclMutex = &handle == webPortTraceDeclMutexHandle;
++    const unsigned long threadId = (unsigned long)pthread_self();
++    const unsigned long ownerBefore = traceDeclMutex
++        ? __atomic_load_n(&webPortTraceDeclMutexOwner, __ATOMIC_ACQUIRE)
++        : 0;
++#endif
++    if (tryLockResult == 0) {
++#if defined(__EMSCRIPTEN__)
++        if (traceDeclMutex) {
++            __atomic_store_n(&webPortTraceDeclMutexDepth, 1, __ATOMIC_RELAXED);
++            __atomic_store_n(&webPortTraceDeclMutexOwner, threadId, __ATOMIC_RELEASE);
+         }
+-        pthread_mutex_lock(&handle);
++#endif
++        return true;
++    }
++#if defined(__EMSCRIPTEN__)
++    if (traceDeclMutex && ownerBefore == threadId) {
++        const unsigned long depth = __atomic_add_fetch(&webPortTraceDeclMutexDepth, 1, __ATOMIC_ACQ_REL);
++        printf("[web-port trace] decl mutex recursive acquisition thread=%lu depth=%lu\n", threadId, depth);
++        fflush(stdout);
++        return true;
++    }
++    if (traceDeclMutex) {
++        printf("[web-port trace] decl mutex contention requester=%lu owner=%lu result=%d blocking=%d\n",
++            threadId, ownerBefore, tryLockResult, blocking ? 1 : 0);
++        fflush(stdout);
++    }
++#endif
++    if (!blocking) {
++        return false;
++    }
++    const int lockResult = pthread_mutex_lock(&handle);
++#if defined(__EMSCRIPTEN__)
++    if (traceDeclMutex && lockResult == 0) {
++        __atomic_store_n(&webPortTraceDeclMutexDepth, 1, __ATOMIC_RELAXED);
++        __atomic_store_n(&webPortTraceDeclMutexOwner, threadId, __ATOMIC_RELEASE);
++        printf("[web-port trace] decl mutex acquired after wait requester=%lu previousOwner=%lu result=%d\n",
++            threadId, ownerBefore, lockResult);
++        fflush(stdout);
++    } else if (traceDeclMutex) {
++        printf("[web-port trace] decl mutex wait returned requester=%lu previousOwner=%lu result=%d\n",
++            threadId, ownerBefore, lockResult);
++        fflush(stdout);
+     }
++#else
++    (void)lockResult;
++#endif
+     return true;
+ }
+ 
+@@ -488,7 +545,36 @@ Sys_MutexUnlock
+ */
+ void Sys_MutexUnlock(mutexHandle_t& handle)
+ {
+-    pthread_mutex_unlock(&handle);
++#if defined(__EMSCRIPTEN__)
++    const bool traceDeclMutex = &handle == webPortTraceDeclMutexHandle;
++    const unsigned long threadId = (unsigned long)pthread_self();
++    if (traceDeclMutex) {
++        const unsigned long owner = __atomic_load_n(&webPortTraceDeclMutexOwner, __ATOMIC_ACQUIRE);
++        if (owner == threadId) {
++            const unsigned long depth = __atomic_load_n(&webPortTraceDeclMutexDepth, __ATOMIC_ACQUIRE);
++            if (depth > 1) {
++                const unsigned long remaining = __atomic_sub_fetch(&webPortTraceDeclMutexDepth, 1, __ATOMIC_ACQ_REL);
++                printf("[web-port trace] decl mutex recursive release thread=%lu depth=%lu\n", threadId, remaining);
++                fflush(stdout);
++                return;
++            }
++            __atomic_store_n(&webPortTraceDeclMutexDepth, 0, __ATOMIC_RELAXED);
++            __atomic_store_n(&webPortTraceDeclMutexOwner, 0, __ATOMIC_RELEASE);
++        } else {
++            printf("[web-port trace] decl mutex unlock owner mismatch thread=%lu owner=%lu\n", threadId, owner);
++            fflush(stdout);
++        }
++    }
++#endif
++    const int unlockResult = pthread_mutex_unlock(&handle);
++#if defined(__EMSCRIPTEN__)
++    if (traceDeclMutex && unlockResult != 0) {
++        printf("[web-port trace] decl mutex unlock failed thread=%lu result=%d\n", threadId, unlockResult);
++        fflush(stdout);
++    }
++#else
++    (void)unlockResult;
++#endif
+ }
+ 
+ /*
+diff --git a/neo/idlib/sys/sys_defines.h b/neo/idlib/sys/sys_defines.h
+index 03569f8..6ceeb33 100644
+--- a/neo/idlib/sys/sys_defines.h
++++ b/neo/idlib/sys/sys_defines.h
+@@ -116,6 +116,8 @@ If you have questions concerning this license or the applicable additional terms
+ 			#define	CPUSTRING						"x86"
+ 		#elif defined(__x86_64__)
+ 			#define CPUSTRING						"x86_64"
++		#elif defined(__wasm32__)
++			#define CPUSTRING						"wasm32"
+ 		#elif defined(__e2k__)
+ 			#define CPUSTRING						"e2k"
+ 		#elif defined(__aarch64__) || defined(__ARM64__) || defined(_M_ARM64)
+@@ -137,7 +139,9 @@ If you have questions concerning this license or the applicable additional terms
+ 		#endif
+ 	#endif
+ 
+-	#if defined(__FreeBSD__)
++	#if defined(__EMSCRIPTEN__)
++		#define BUILD_STRING					"emscripten-" CPUSTRING
++	#elif defined(__FreeBSD__)
+ 		#define	BUILD_STRING					"freebsd-" CPUSTRING
+ 	#elif defined(__linux__)
+ 		#define	BUILD_STRING					"linux-" CPUSTRING
+diff --git a/neo/renderer/BufferObject.cpp b/neo/renderer/BufferObject.cpp
+index e891348..c1c2729 100644
+--- a/neo/renderer/BufferObject.cpp
++++ b/neo/renderer/BufferObject.cpp
+@@ -35,6 +35,12 @@ idCVar r_showBuffers("r_showBuffers", "0", CVAR_INTEGER, "");
+ // static const GLenum bufferUsage = GL_STATIC_DRAW_ARB;
+ static const GLenum bufferUsage = GL_DYNAMIC_DRAW_ARB;
+ 
++#if defined(__EMSCRIPTEN__)
++// Emscripten stages mapped writes in a scratch buffer and commits explicit flushes.
++// Its WebGL shim rejects read and unsynchronized map flags and requires an invalidate hint.
++static const GLbitfield WEBGL_BUFFER_WRITE_MAP_FLAGS = GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_FLUSH_EXPLICIT_BIT;
++#endif
++
+ // RB begin
+ #if defined(_WIN32)
+ /*
+@@ -339,13 +345,21 @@ void* idVertexBuffer::MapBuffer(bufferMapType_t mapType) const
+         }
+     } else if (mapType == BM_WRITE) {
+         // buffer = qglMapBufferARB( GL_ARRAY_BUFFER_ARB, GL_WRITE_ONLY_ARB );
++#if defined(__EMSCRIPTEN__)
++        buffer = qglMapBufferRange(GL_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), WEBGL_BUFFER_WRITE_MAP_FLAGS);
++#else
+         buffer = qglMapBufferRange(GL_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
++#endif
+         if (buffer != NULL) {
+             buffer = (byte*)buffer + GetOffset();
+         }
+         // assert( IsWriteCombined( buffer ) ); // commented out because it spams the console
+     } else if (mapType == BM_WRITE_NOINVALIDATE) {
++#if defined(__EMSCRIPTEN__)
++        buffer = qglMapBufferRange(GL_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), WEBGL_BUFFER_WRITE_MAP_FLAGS);
++#else
+         buffer = qglMapBufferRange(GL_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
++#endif
+         if (buffer != NULL) {
+             buffer = (byte*)buffer + GetOffset();
+         }
+@@ -618,13 +632,21 @@ void* idIndexBuffer::MapBuffer(bufferMapType_t mapType) const
+         }
+     } else if (mapType == BM_WRITE) {
+         // buffer = qglMapBufferARB( GL_ELEMENT_ARRAY_BUFFER_ARB, GL_WRITE_ONLY_ARB );
++#if defined(__EMSCRIPTEN__)
++        buffer = qglMapBufferRange(GL_ELEMENT_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), WEBGL_BUFFER_WRITE_MAP_FLAGS);
++#else
+         buffer = qglMapBufferRange(GL_ELEMENT_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
++#endif
+         if (buffer != NULL) {
+             buffer = (byte*)buffer + GetOffset();
+         }
+         // assert( IsWriteCombined( buffer ) ); // commented out because it spams the console
+     } else if (mapType == BM_WRITE_NOINVALIDATE) {
++#if defined(__EMSCRIPTEN__)
++        buffer = qglMapBufferRange(GL_ELEMENT_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), WEBGL_BUFFER_WRITE_MAP_FLAGS);
++#else
+         buffer = qglMapBufferRange(GL_ELEMENT_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
++#endif
+         if (buffer != NULL) {
+             buffer = (byte*)buffer + GetOffset();
+         }
+@@ -874,7 +896,11 @@ float* idJointBuffer::MapBuffer(bufferMapType_t mapType) const
+     numBytes = numBytes;
+     assert(GetOffset() == 0);
+     // buffer = qglMapBufferARB( GL_UNIFORM_BUFFER, GL_WRITE_ONLY_ARB );
++#if defined(__EMSCRIPTEN__)
++    buffer = qglMapBufferRange(GL_UNIFORM_BUFFER, 0, GetAllocedSize(), WEBGL_BUFFER_WRITE_MAP_FLAGS);
++#else
+     buffer = qglMapBufferRange(GL_UNIFORM_BUFFER, 0, GetAllocedSize(), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
++#endif
+     if (buffer != NULL) {
+         buffer = (byte*)buffer + GetOffset();
+     }
+diff --git a/neo/renderer/Font.cpp b/neo/renderer/Font.cpp
+index a5129fe..4a47529 100644
+--- a/neo/renderer/Font.cpp
++++ b/neo/renderer/Font.cpp
+@@ -94,8 +94,10 @@ idFont::idFont
+ idFont::idFont(const char* n)
+     : name(n)
+ {
++    idLib::Printf("[web-port trace] font ctor begin '%s'\n", n);
+     fontInfo = NULL;
+     alias = RemapFont(n);
++    idLib::Printf("[web-port trace] font alias resolution complete '%s'\n", n);
+ 
+     if (alias != NULL) {
+         // Make sure we don't have a circular reference
+@@ -107,7 +109,9 @@ idFont::idFont(const char* n)
+         return;
+     }
+ 
++    idLib::Printf("[web-port trace] font load begin '%s'\n", n);
+     if (!LoadFont()) {
++        idLib::Printf("[web-port trace] font load missing '%s'\n", n);
+         if (name.Icmp(DEFAULT_FONT) == 0) {
+             idLib::FatalError("Could not load default font \"%s\"", DEFAULT_FONT);
+         } else {
+@@ -141,6 +145,7 @@ LoadOldGlyphData
+ */
+ bool LoadOldGlyphData(const char* filename, oldGlyphInfo_t glyphInfo[GLYPHS_PER_FONT])
+ {
++    idLib::Printf("[web-port trace] old glyph data open '%s'\n", filename);
+     idFile* fd = fileSystem->OpenFileRead(filename);
+     if (fd == NULL) {
+         return false;
+@@ -186,6 +191,7 @@ bool idFont::LoadFont()
+ 
+     uint32 version = 0;
+     fd->ReadBig(version);
++    idLib::Printf("[web-port trace] font version read '%s'\n", GetName());
+     if (version != FONT_INFO_MAGIC) {
+         idLib::Warning("Wrong version in %s", GetName());
+         delete fd;
+@@ -203,6 +209,7 @@ bool idFont::LoadFont()
+     fd->ReadBig(fontInfo->descender);
+ 
+     fd->ReadBig(fontInfo->numGlyphs);
++    idLib::Printf("[web-port trace] font glyph count '%s'=%d\n", GetName(), fontInfo->numGlyphs);
+ 
+     fontInfo->glyphData = (glyphInfo_t*)Mem_Alloc(sizeof(glyphInfo_t) * fontInfo->numGlyphs, TAG_FONT);
+     fontInfo->charIndex = (uint32*)Mem_Alloc(sizeof(uint32) * fontInfo->numGlyphs, TAG_FONT);
+@@ -221,6 +228,7 @@ bool idFont::LoadFont()
+ 
+     fd->Read(fontInfo->charIndex, fontInfo->numGlyphs * sizeof(uint32));
+     idSwap::LittleArray(fontInfo->charIndex, fontInfo->numGlyphs);
++    idLib::Printf("[web-port trace] font glyph indices read '%s'\n", GetName());
+ 
+     memset(fontInfo->ascii, -1, sizeof(fontInfo->ascii));
+     for (int i = 0; i < fontInfo->numGlyphs; i++) {
+@@ -235,8 +243,11 @@ bool idFont::LoadFont()
+     idStr fontTextureName = fontName;
+     fontTextureName.SetFileExtension("tga");
+ 
++    idLib::Printf("[web-port trace] font material lookup begin '%s'\n", fontTextureName.c_str());
+     fontInfo->material = declManager->FindMaterial(fontTextureName);
++    idLib::Printf("[web-port trace] font material lookup complete '%s'\n", fontTextureName.c_str());
+     fontInfo->material->SetSort(SS_GUI);
++    idLib::Printf("[web-port trace] font material ready '%s'\n", GetName());
+ 
+     // Load the old glyph data because we want our new fonts to fit in the old glyph metrics
+     int pointSizes[3] = { 12, 24, 48 };
+@@ -244,6 +255,7 @@ bool idFont::LoadFont()
+     for (int i = 0; i < 3; i++) {
+         oldGlyphInfo_t oldGlyphInfo[GLYPHS_PER_FONT];
+         const char* oldFileName = va("newfonts/%s/old_%d.dat", GetName(), pointSizes[i]);
++        idLib::Printf("[web-port trace] font legacy metrics begin '%s' %d\n", GetName(), pointSizes[i]);
+         if (LoadOldGlyphData(oldFileName, oldGlyphInfo)) {
+             int mh = 0;
+             int mw = 0;
+@@ -271,6 +283,7 @@ bool idFont::LoadFont()
+             fontInfo->oldInfo[i].maxWidth = mw;
+             fontInfo->oldInfo[i].maxHeight = mh;
+         }
++        idLib::Printf("[web-port trace] font legacy metrics complete '%s' %d\n", GetName(), pointSizes[i]);
+     }
+     delete fd;
+     return true;
+diff --git a/neo/renderer/Image_files.cpp b/neo/renderer/Image_files.cpp
+index a7c110e..741305d 100644
+--- a/neo/renderer/Image_files.cpp
++++ b/neo/renderer/Image_files.cpp
+@@ -589,6 +589,10 @@ timestamp.
+ void R_LoadImage(const char* cname, byte** pic, int* width, int* height, ID_TIME_T* timestamp, bool makePowerOf2)
+ {
+     idStr name = cname;
++#if defined(__EMSCRIPTEN__)
++    const bool webFontTrace = cname && idStr::Icmpn(cname, "newfonts/", 9) == 0;
++    if (webFontTrace) common->Printf("[web-port trace] font R_LoadImage begin '%s'\n", cname);
++#endif
+ 
+     if (pic) {
+         *pic = NULL;
+@@ -614,7 +618,13 @@ void R_LoadImage(const char* cname, byte** pic, int* width, int* height, ID_TIME
+     name.ExtractFileExtension(ext);
+ 
+     if (ext == "tga") {
++#if defined(__EMSCRIPTEN__)
++        if (webFontTrace) common->Printf("[web-port trace] font LoadTGA begin '%s'\n", name.c_str());
++#endif
+         LoadTGA(name.c_str(), pic, width, height, timestamp);      // try tga first
++#if defined(__EMSCRIPTEN__)
++        if (webFontTrace) common->Printf("[web-port trace] font LoadTGA complete '%s' %dx%d\n", name.c_str(), width ? *width : -1, height ? *height : -1);
++#endif
+         if ((pic && *pic == 0) || (timestamp && *timestamp == -1)) //-V595
+         {
+             name.StripFileExtension();
+@@ -624,6 +634,9 @@ void R_LoadImage(const char* cname, byte** pic, int* width, int* height, ID_TIME
+     } else if (ext == "jpg") {
+         LoadJPG(name.c_str(), pic, width, height, timestamp);
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font R_LoadImage complete '%s'\n", name.c_str());
++#endif
+ 
+     if ((width && *width < 1) || (height && *height < 1)) {
+         if (pic && *pic) {
+diff --git a/neo/renderer/Image_program.cpp b/neo/renderer/Image_program.cpp
+index b8574b7..6cf21c6 100644
+--- a/neo/renderer/Image_program.cpp
++++ b/neo/renderer/Image_program.cpp
+@@ -607,7 +607,14 @@ static bool R_ParseImageProgram_r(idLexer& src, byte** pic, int* width, int* hei
+     }
+ 
+     // load it as an image
++#if defined(__EMSCRIPTEN__)
++    const bool webFontTrace = idStr::Icmpn(token.c_str(), "newfonts/", 9) == 0;
++    if (webFontTrace) common->Printf("[web-port trace] font image program load begin '%s'\n", token.c_str());
++#endif
+     R_LoadImage(token.c_str(), pic, width, height, &timestamp, true);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font image program load complete '%s' %dx%d\n", token.c_str(), width ? *width : -1, height ? *height : -1);
++#endif
+ 
+     if (timestamp == -1) {
+         return false;
+diff --git a/neo/renderer/Material.cpp b/neo/renderer/Material.cpp
+index 029158e..b85e319 100644
+--- a/neo/renderer/Material.cpp
++++ b/neo/renderer/Material.cpp
+@@ -2206,23 +2206,54 @@ Parses the current material definition and finds all necessary images.
+ */
+ bool idMaterial::Parse(const char* text, const int textLength, bool allowBinaryVersion)
+ {
++#if defined(__EMSCRIPTEN__)
++    const bool webFontTrace = base && base->GetName() && idStr::Icmpn(base->GetName(), "newfonts/", 9) == 0;
++    if (webFontTrace) common->Printf("[web-port trace] font Material::Parse begin\n");
++#endif
+     idLexer src;
+     idToken token;
+     mtrParsingData_t parsingData;
+ 
+     src.LoadMemory(text, textLength, GetFileName(), GetLineNum());
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font material lexer memory loaded len=%d\n", textLength);
++#endif
+     src.SetFlags(DECL_LEXER_FLAGS);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font material lexer flags set\n");
++#endif
+     src.SkipUntilString("{");
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font material opening brace found\n");
++#endif
+ 
+     // reset to the unparsed state
+     CommonInit();
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font material CommonInit complete\n");
++#endif
+ 
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font parsing data clear begin size=%u\n", (unsigned)sizeof(parsingData));
++#endif
+     memset(&parsingData, 0, sizeof(parsingData));
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font parsing data clear complete\n");
++#endif
+ 
+     pd = &parsingData; // this is only valid during parse
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font parsing data bound\n");
++#endif
+ 
+     // parse it
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font ParseMaterial begin\n");
++#endif
+     ParseMaterial(src);
++#if defined(__EMSCRIPTEN__)
++    if (webFontTrace) common->Printf("[web-port trace] font ParseMaterial complete\n");
++#endif
+ 
+     // if we are doing an fs_copyfiles, also reference the editorImage
+     if (cvarSystem->GetCVarInteger("fs_copyFiles")) {
+diff --git a/neo/renderer/OpenGL/gl_Image.cpp b/neo/renderer/OpenGL/gl_Image.cpp
+index d49eff4..aae842c 100644
+--- a/neo/renderer/OpenGL/gl_Image.cpp
++++ b/neo/renderer/OpenGL/gl_Image.cpp
+@@ -35,6 +35,118 @@ Contains the Image implementation for OpenGL.
+ */
+ 
+ #include "../tr_local.h"
++#if defined(__EMSCRIPTEN__)
++#include "../DXT/DXTCodec.h"
++
++static bool WebGLNeedsRGBAExpansion(const idImageOpts& opts)
++{
++    return opts.colorFormat == CFM_GREEN_ALPHA
++        || ((opts.format == FMT_DXT1 || opts.format == FMT_DXT5) && !glConfig.textureCompressionAvailable)
++        || opts.format == FMT_ALPHA
++        || opts.format == FMT_L8A8
++        || opts.format == FMT_LUM8
++        || opts.format == FMT_INT8
++        || opts.format == FMT_X16
++        || opts.format == FMT_Y16_X16;
++}
++
++static int WebGLSourceBytesPerPixel(textureFormat_t format)
++{
++    switch (format) {
++    case FMT_ALPHA:
++    case FMT_LUM8:
++    case FMT_INT8:
++        return 1;
++    case FMT_L8A8:
++    case FMT_X16:
++    case FMT_RGB565:
++        return 2;
++    case FMT_Y16_X16:
++        return 4;
++    case FMT_RGBA8:
++    case FMT_XRGB8:
++        return 4;
++    default:
++        return 0;
++    }
++}
++
++static byte WebGLNormalize16To8(unsigned short value)
++{
++    return (byte)((value * 255u + 32767u) / 65535u);
++}
++
++static void WebGLExpandTexturePixels(const byte* source, textureFormat_t format, textureColor_t colorFormat,
++    int width, int height, int sourceRowPixels, byte* destination)
++{
++    const int sourceBytesPerPixel = WebGLSourceBytesPerPixel(format);
++    assert(sourceBytesPerPixel > 0);
++
++    for (int y = 0; y < height; ++y) {
++        for (int x = 0; x < width; ++x) {
++            const byte* src = source + ((size_t)y * sourceRowPixels + x) * sourceBytesPerPixel;
++            byte* dst = destination + ((size_t)y * width + x) * 4;
++            if (colorFormat == CFM_GREEN_ALPHA) {
++                byte green = 0;
++                switch (format) {
++                case FMT_RGBA8:
++                case FMT_XRGB8:
++                    green = src[1];
++                    break;
++                case FMT_L8A8:
++                    green = src[1];
++                    break;
++                case FMT_RGB565: {
++                    const unsigned short pixel = ((const unsigned short*)src)[0];
++                    green = (byte)((((pixel >> 5) & 0x3fu) * 255u + 31u) / 63u);
++                } break;
++                case FMT_X16:
++                    green = WebGLNormalize16To8(((const unsigned short*)src)[0]);
++                    break;
++                case FMT_Y16_X16:
++                    green = WebGLNormalize16To8(((const unsigned short*)src)[0]);
++                    break;
++                default:
++                    break;
++                }
++                dst[0] = dst[1] = dst[2] = 255;
++                dst[3] = green;
++                continue;
++            }
++
++            switch (format) {
++            case FMT_ALPHA:
++                dst[0] = dst[1] = dst[2] = 255;
++                dst[3] = src[0];
++                break;
++            case FMT_LUM8:
++                dst[0] = dst[1] = dst[2] = src[0];
++                dst[3] = 255;
++                break;
++            case FMT_L8A8:
++                dst[0] = dst[1] = dst[2] = src[0];
++                dst[3] = src[1];
++                break;
++            case FMT_INT8:
++                dst[0] = dst[1] = dst[2] = dst[3] = src[0];
++                break;
++            case FMT_X16: {
++                const byte value = WebGLNormalize16To8(((const unsigned short*)src)[0]);
++                dst[0] = dst[1] = dst[2] = dst[3] = value;
++            } break;
++            case FMT_Y16_X16: {
++                const unsigned short* value = (const unsigned short*)src;
++                dst[0] = dst[1] = dst[2] = WebGLNormalize16To8(value[0]);
++                dst[3] = WebGLNormalize16To8(value[1]);
++            } break;
++            default:
++                memcpy(dst, src, 4);
++                break;
++            }
++        }
++    }
++}
++#endif
+ 
+ /*
+ ========================
+@@ -48,6 +161,11 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int h
+     const bool isGLES = (glConfig.driverType == GLDRV_OPENGL_ES2) || (glConfig.driverType == GLDRV_OPENGL_ES3);
+ 
+     int compressedSize = 0;
++#if defined(__EMSCRIPTEN__)
++    const bool webExpandTexture = WebGLNeedsRGBAExpansion(opts);
++    const int sourceWidth = width;
++    const int sourceHeight = height;
++#endif
+ 
+     if (IsCompressed()) {
+         assert(!(x & 3) && !(y & 3));
+@@ -90,7 +208,11 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int h
+ 
+     qglBindTexture(target, texnum);
+ 
+-    if (pixelPitch != 0) {
++    if (pixelPitch != 0
++#if defined(__EMSCRIPTEN__)
++        && !webExpandTexture
++#endif
++        ) {
+         qglPixelStorei(GL_UNPACK_ROW_LENGTH, pixelPitch);
+     }
+     if (opts.format == FMT_RGB565 && !isGLES) {
+@@ -100,7 +222,38 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int h
+ #ifdef DEBUG
+     GL_CheckErrors();
+ #endif
+-    if (IsCompressed()) {
++    byte* webExpandedPixels = NULL;
++    byte* webDecodedPixels = NULL;
++    const void* uploadPixels = pic;
++#if defined(__EMSCRIPTEN__)
++    if (webExpandTexture) {
++        const size_t expandedSize = (size_t)width * height * 4;
++        webExpandedPixels = (byte*)Mem_Alloc((int)expandedSize, TAG_TEMP);
++        if (pic == NULL) {
++            memset(webExpandedPixels, 0, expandedSize);
++        } else if (IsCompressed()) {
++            webDecodedPixels = (byte*)Mem_Alloc(sourceWidth * sourceHeight * 4, TAG_TEMP);
++            idDxtDecoder decoder;
++            if (opts.format == FMT_DXT1) {
++                decoder.DecompressImageDXT1((const byte*)pic, webDecodedPixels, sourceWidth, sourceHeight);
++            } else if (opts.format == FMT_DXT5) {
++                decoder.DecompressImageDXT5((const byte*)pic, webDecodedPixels, sourceWidth, sourceHeight);
++            } else {
++                idLib::FatalError("Unsupported compressed WebGL channel swizzle in %s", GetName());
++            }
++            WebGLExpandTexturePixels(webDecodedPixels, FMT_RGBA8, opts.colorFormat, width, height, sourceWidth, webExpandedPixels);
++        } else {
++            const int sourceRowPixels = pixelPitch != 0 ? pixelPitch : sourceWidth;
++            WebGLExpandTexturePixels((const byte*)pic, opts.format, opts.colorFormat, width, height, sourceRowPixels, webExpandedPixels);
++        }
++        uploadPixels = webExpandedPixels;
++    }
++#endif
++    if (IsCompressed()
++#if defined(__EMSCRIPTEN__)
++        && !webExpandTexture
++#endif
++        ) {
+         qglCompressedTexSubImage2DARB(uploadTarget, mipLevel, x, y, width, height, internalFormat, compressedSize, pic);
+     } else {
+ 
+@@ -108,13 +261,18 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int h
+         // properly for odd shaped textures - this fixes the mip mapping issues with
+         // fonts
+         int unpackAlignment = width * BitsForFormat((textureFormat_t)opts.format) / 8;
++#if defined(__EMSCRIPTEN__)
++        if (webExpandTexture) {
++            unpackAlignment = width * 4;
++        }
++#endif
+         if ((unpackAlignment & 3) == 0) {
+             qglPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+         } else {
+             qglPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+         }
+ 
+-        qglTexSubImage2D(uploadTarget, mipLevel, x, y, width, height, dataFormat, dataType, pic);
++        qglTexSubImage2D(uploadTarget, mipLevel, x, y, width, height, dataFormat, dataType, uploadPixels);
+     }
+ #ifdef DEBUG
+     GL_CheckErrors();
+@@ -123,9 +281,17 @@ void idImage::SubImageUpload(int mipLevel, int x, int y, int z, int width, int h
+         // FIXME: GLES doesn't support this
+         qglPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
+     }
+-    if (pixelPitch != 0) {
++    if (pixelPitch != 0
++#if defined(__EMSCRIPTEN__)
++        && !webExpandTexture
++#endif
++        ) {
+         qglPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webExpandedPixels != NULL) Mem_Free(webExpandedPixels);
++    if (webDecodedPixels != NULL) Mem_Free(webDecodedPixels);
++#endif
+ }
+ 
+ /*
+@@ -160,7 +326,7 @@ void idImage::SetTexParameters()
+ 
+     // ALPHA, LUMINANCE, LUMINANCE_ALPHA, and INTENSITY have been removed
+     // in OpenGL 3.2. In order to mimic those modes, we use the swizzle operators
+-#if defined(USE_CORE_PROFILE)
++#if defined(USE_CORE_PROFILE) && !defined(__EMSCRIPTEN__)
+     if (opts.colorFormat == CFM_GREEN_ALPHA) {
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_R, GL_ONE);
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_G, GL_ONE);
+@@ -192,7 +358,7 @@ void idImage::SetTexParameters()
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_B, GL_BLUE);
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_A, GL_ALPHA);
+     }
+-#else
++#elif !defined(__EMSCRIPTEN__)
+     if (opts.colorFormat == CFM_GREEN_ALPHA) {
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_R, GL_ONE);
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_G, GL_ONE);
+@@ -205,7 +371,6 @@ void idImage::SetTexParameters()
+         qglTexParameteri(target, GL_TEXTURE_SWIZZLE_A, GL_RED);
+     }
+ #endif
+-
+     switch (filter) {
+     case TF_DEFAULT:
+         if (r_useTrilinearFiltering.GetBool()) {
+@@ -254,16 +419,29 @@ void idImage::SetTexParameters()
+         qglTexParameterf(target, GL_TEXTURE_WRAP_T, GL_REPEAT);
+         break;
+     case TR_CLAMP_TO_ZERO: {
++#if defined(__EMSCRIPTEN__)
++        // WebGL2 has no CLAMP_TO_BORDER. Preserve the engine's zero-border
++        // textures as edge-clamped textures until shader-side border emulation
++        // is available, and avoid invalid texture-parameter enums.
++        qglTexParameterf(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        qglTexParameterf(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++#else
+         float color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+         qglTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, color);
+         qglTexParameterf(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+         qglTexParameterf(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
++#endif
+     } break;
+     case TR_CLAMP_TO_ZERO_ALPHA: {
++#if defined(__EMSCRIPTEN__)
++        qglTexParameterf(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        qglTexParameterf(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++#else
+         float color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+         qglTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, color);
+         qglTexParameterf(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+         qglTexParameterf(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
++#endif
+     } break;
+     case TR_CLAMP:
+         qglTexParameterf(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+@@ -374,6 +552,14 @@ void idImage::AllocImage()
+         idLib::Error("Unhandled image format %d in %s\n", opts.format, GetName());
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    if (WebGLNeedsRGBAExpansion(opts)) {
++        internalFormat = GL_RGBA8;
++        dataFormat = GL_RGBA;
++        dataType = GL_UNSIGNED_BYTE;
++    }
++#endif
++
+     // if we don't have a rendering context, just return after we
+     // have filled in the parms.  We must have the values set, or
+     // an image match from a shader before OpenGL starts would miss
+@@ -419,7 +605,11 @@ void idImage::AllocImage()
+             // clear out any previous error
+             GL_CheckErrors();
+ 
+-            if (IsCompressed()) {
++            if (IsCompressed()
++#if defined(__EMSCRIPTEN__)
++                && !WebGLNeedsRGBAExpansion(opts)
++#endif
++                ) {
+                 int compressedSize = (((w + 3) / 4) * ((h + 3) / 4) * int64(16) * BitsForFormat(opts.format)) / 8;
+ 
+                 // Even though the OpenGL specification allows the 'data' pointer to be NULL, for some
+diff --git a/neo/renderer/OpenGL/gl_backend.cpp b/neo/renderer/OpenGL/gl_backend.cpp
+index 6548171..76b912f 100644
+--- a/neo/renderer/OpenGL/gl_backend.cpp
++++ b/neo/renderer/OpenGL/gl_backend.cpp
+@@ -51,6 +51,15 @@ static GLsync renderSync[2];
+ void GLimp_SwapBuffers();
+ void RB_SetMVP(const idRenderMatrix& mvp);
+ 
++#if defined(__EMSCRIPTEN__)
++static int webPortSwapExecutionCount = 0;
++
++int WebPortGetSwapExecutionCount()
++{
++    return webPortSwapExecutionCount;
++}
++#endif
++
+ /*
+ ============================================================================
+ 
+@@ -119,6 +128,9 @@ We want to exit this with the GPU idle, right at vsync
+ */
+ const void GL_BlockingSwapBuffers()
+ {
++#if defined(__EMSCRIPTEN__)
++    ++webPortSwapExecutionCount;
++#endif
+     RENDERLOG_PRINTF("***************** GL_BlockingSwapBuffers *****************\n\n\n");
+ 
+     const int beforeFinish = Sys_Milliseconds();
+@@ -306,7 +318,9 @@ void RB_StereoRenderExecuteBackEndCommands(const emptyCommand_t* const allCmds)
+     // performance on most cards and drivers, but it is better than getting
+     // a confusing, half-ghosted view.
+     if (renderSystem->GetStereo3DMode() != STEREO3D_QUAD_BUFFER) {
++#if !defined(USE_GLES2)
+         glDrawBuffer(GL_BACK);
++#endif
+     }
+ 
+     GL_State(GLS_DEPTHFUNC_ALWAYS);
+@@ -329,14 +343,18 @@ void RB_StereoRenderExecuteBackEndCommands(const emptyCommand_t* const allCmds)
+ 
+     switch (renderSystem->GetStereo3DMode()) {
+     case STEREO3D_QUAD_BUFFER:
++#if !defined(USE_GLES2)
+         glDrawBuffer(GL_BACK_RIGHT);
++#endif
+         GL_SelectTexture(0);
+         stereoRenderImages[1]->Bind();
+         GL_SelectTexture(1);
+         stereoRenderImages[0]->Bind();
+         RB_DrawElementsWithCounters(&backEnd.unitSquareSurface);
+ 
++#if !defined(USE_GLES2)
+         glDrawBuffer(GL_BACK_LEFT);
++#endif
+         GL_SelectTexture(1);
+         stereoRenderImages[1]->Bind();
+         GL_SelectTexture(0);
+@@ -502,6 +520,24 @@ smp extensions, or asyncronously by another thread.
+ */
+ void RB_ExecuteBackEndCommands(const emptyCommand_t* cmds)
+ {
++#if defined(__EMSCRIPTEN__)
++    static bool webPortBackendTraceDone = false;
++    const bool webPortTraceGl = !webPortBackendTraceDone;
++    bool webPortFoundGlError = false;
++    auto webPortCheckGl = [&](const char* point) {
++        GLenum error;
++        while ((error = qglGetError()) != GL_NO_ERROR) {
++            if (!webPortFoundGlError) {
++                common->Printf("[web-port trace] first backend GL error 0x%x at %s\n", error, point);
++                webPortFoundGlError = true;
++            }
++        }
++    };
++    if (webPortTraceGl) {
++        while (qglGetError() != GL_NO_ERROR) {
++        }
++    }
++#endif
+     // r_debugRenderToTexture
+     int c_draw3d = 0;
+     int c_draw2d = 0;
+@@ -528,6 +564,9 @@ void RB_ExecuteBackEndCommands(const emptyCommand_t* cmds)
+ 
+     // needed for editor rendering
+     GL_SetDefaultState();
++#if defined(__EMSCRIPTEN__)
++    if (webPortTraceGl) webPortCheckGl("default state");
++#endif
+ 
+     // If we have a stereo pixel format, this will draw to both
+     // the back left and back right buffers, which will have a
+@@ -562,6 +601,9 @@ void RB_ExecuteBackEndCommands(const emptyCommand_t* cmds)
+             common->Error("RB_ExecuteBackEndCommands: bad commandId");
+             break;
+         }
++#if defined(__EMSCRIPTEN__)
++        if (webPortTraceGl) webPortCheckGl(va("command %d", cmds->commandId));
++#endif
+     }
+ 
+     RB_DrawFlickerBox();
+@@ -570,6 +612,12 @@ void RB_ExecuteBackEndCommands(const emptyCommand_t* cmds)
+     qglColorMask(1, 1, 1, 1);
+ 
+     qglFlush();
++#if defined(__EMSCRIPTEN__)
++    if (webPortTraceGl) {
++        webPortCheckGl("flush");
++        webPortBackendTraceDone = true;
++    }
++#endif
+ 
+     // stop rendering on this thread
+     uint64 backEndFinishTime = Sys_Microseconds();
+diff --git a/neo/renderer/RenderSystem.cpp b/neo/renderer/RenderSystem.cpp
+index 9caadf3..615c544 100644
+--- a/neo/renderer/RenderSystem.cpp
++++ b/neo/renderer/RenderSystem.cpp
+@@ -34,6 +34,53 @@ If you have questions concerning this license or the applicable additional terms
+ idRenderSystemLocal tr;
+ idRenderSystem* renderSystem = &tr;
+ 
++#if defined(__EMSCRIPTEN__)
++static int webPortBackendExecutionCount = 0;
++
++int WebPortCountRenderCommands(const void* commandHead, bool viewOnly)
++{
++    int count = 0;
++    for (const emptyCommand_t* cmd = (const emptyCommand_t*)commandHead; cmd; cmd = (const emptyCommand_t*)cmd->next) {
++        if (!viewOnly || cmd->commandId == RC_DRAW_VIEW_3D || cmd->commandId == RC_DRAW_VIEW_GUI) {
++            ++count;
++        }
++    }
++    return count;
++}
++
++int WebPortGetRenderCommandId(const void* commandHead, int commandIndex)
++{
++    const emptyCommand_t* cmd = (const emptyCommand_t*)commandHead;
++    while (cmd && commandIndex > 0) {
++        cmd = (const emptyCommand_t*)cmd->next;
++        --commandIndex;
++    }
++    return cmd ? (int)cmd->commandId : -1;
++}
++
++void WebPortGetRenderViewStats(const void* commandHead, int* drawSurfs, int* viewportWidth, int* viewportHeight)
++{
++    *drawSurfs = 0;
++    *viewportWidth = 0;
++    *viewportHeight = 0;
++    for (const emptyCommand_t* cmd = (const emptyCommand_t*)commandHead; cmd; cmd = (const emptyCommand_t*)cmd->next) {
++        if (cmd->commandId == RC_DRAW_VIEW_3D || cmd->commandId == RC_DRAW_VIEW_GUI) {
++            const drawSurfsCommand_t* viewCommand = (const drawSurfsCommand_t*)cmd;
++            if (viewCommand->viewDef) {
++                *drawSurfs += viewCommand->viewDef->numDrawSurfs;
++                *viewportWidth = viewCommand->viewDef->viewport.GetWidth();
++                *viewportHeight = viewCommand->viewDef->viewport.GetHeight();
++            }
++        }
++    }
++}
++
++int WebPortGetBackendExecutionCount()
++{
++    return webPortBackendExecutionCount;
++}
++#endif
++
+ /*
+ =====================
+ R_PerformanceCounters
+@@ -101,6 +148,21 @@ void idRenderSystemLocal::RenderCommandBuffers(const emptyCommand_t* const cmdHe
+             break;
+         }
+     }
++#if defined(__EMSCRIPTEN__)
++    static int webPortRenderTraceFrames = 0;
++    if (webPortRenderTraceFrames < 2) {
++        int commandCount = 0;
++        for (const emptyCommand_t* cmd = cmdHead; cmd; cmd = (const emptyCommand_t*)cmd->next) {
++            ++commandCount;
++        }
++        common->Printf("[web-port render] command list %d hasView=%d count=%d\n", webPortRenderTraceFrames, hasView ? 1 : 0, commandCount);
++        int loggedCommands = 0;
++        for (const emptyCommand_t* cmd = cmdHead; cmd && loggedCommands < 12; cmd = (const emptyCommand_t*)cmd->next, ++loggedCommands) {
++            common->Printf("[web-port render] command index=%d id=%d\n", loggedCommands, cmd->commandId);
++        }
++        ++webPortRenderTraceFrames;
++    }
++#endif
+     if (!hasView) {
+         return;
+     }
+@@ -123,6 +185,7 @@ void idRenderSystemLocal::RenderCommandBuffers(const emptyCommand_t* const cmdHe
+             qglEndQueryARB(GL_TIME_ELAPSED_EXT);
+             qglFlush();
+         } else {
++            ++webPortBackendExecutionCount;
+             RB_ExecuteBackEndCommands(cmdHead);
+         }
+     }
+@@ -650,6 +713,15 @@ void idRenderSystemLocal::SwapCommandBuffers_FinishRendering(
+     uint64* shadowMicroSec,
+     uint64* gpuMicroSec)
+ {
++#if defined(__EMSCRIPTEN__)
++    auto webPortCheckGl = [&](const char* point) {
++        GLenum error;
++        while ((error = qglGetError()) != GL_NO_ERROR) {
++            common->Printf("[web-port trace] frame GL error 0x%x after %s\n", error, point);
++        }
++    };
++    webPortCheckGl("frame entry");
++#endif
+     SCOPED_PROFILE_EVENT("SwapCommandBuffers");
+ 
+     if (gpuMicroSec != NULL) {
+@@ -666,6 +738,9 @@ void idRenderSystemLocal::SwapCommandBuffers_FinishRendering(
+         // We must do this before clearing any resources the GPU may be using
+         void GL_BlockingSwapBuffers();
+         GL_BlockingSwapBuffers();
++#if defined(__EMSCRIPTEN__)
++        webPortCheckGl("blocking swap");
++#endif
+     }
+ 
+     // read back the start and end timer queries from the previous frame
+@@ -697,9 +772,15 @@ void idRenderSystemLocal::SwapCommandBuffers_FinishRendering(
+ 
+     // print any other statistics and clear all of them
+     R_PerformanceCounters();
++#if defined(__EMSCRIPTEN__)
++    webPortCheckGl("performance counters");
++#endif
+ 
+     // check for dynamic changes that require some initialization
+     R_CheckCvars();
++#if defined(__EMSCRIPTEN__)
++    webPortCheckGl("cvar checks");
++#endif
+ 
+     // check for errors
+     GL_CheckErrors();
+diff --git a/neo/renderer/RenderSystem_init.cpp b/neo/renderer/RenderSystem_init.cpp
+index 37444a5..19dfcb5 100644
+--- a/neo/renderer/RenderSystem_init.cpp
++++ b/neo/renderer/RenderSystem_init.cpp
+@@ -30,5 +30,8 @@
+ #include "precompiled.h"
+ 
+ #include "tr_local.h"
++#if defined(__EMSCRIPTEN__)
++#include <emscripten/html5_webgl.h>
++#endif
+ 
+ // RB begin
+@@ -433,8 +436,16 @@ static void R_CheckPortableExtensions()
+ 
+     // GL_ARB_texture_compression + GL_S3_s3tc
+     // DRI drivers may have GL_ARB_texture_compression but no GL_EXT_texture_compression_s3tc
++#if defined(__EMSCRIPTEN__)
++    // Use native S3TC uploads where available; the WebGL RGBA decoder remains the fallback.
++    const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webglContext = emscripten_webgl_get_current_context();
++    glConfig.textureCompressionAvailable = webglContext > 0 && emscripten_webgl_enable_extension(webglContext, "WEBGL_compressed_texture_s3tc");
++    idLib::Printf("[web-port memory] s3tc_extension_enabled=%d context=%d\n", glConfig.textureCompressionAvailable ? 1 : 0, (int)webglContext);
++#else
++    const bool s3tcAvailable = R_CheckExtension("GL_EXT_texture_compression_s3tc");
+     glConfig.textureCompressionAvailable = ( isGLES || glConfig.glVersion >= 3.0 || R_CheckExtension("GL_ARB_texture_compression") )
+-                                            && R_CheckExtension("GL_EXT_texture_compression_s3tc");
++                                            && s3tcAvailable;
++#endif
+     if (glConfig.textureCompressionAvailable) {
+         qglCompressedTexImage2DARB = (PFNGLCOMPRESSEDTEXIMAGE2DARBPROC)GLimp_ExtensionPointer("glCompressedTexImage2D", true);
+         qglCompressedTexSubImage2DARB = (PFNGLCOMPRESSEDTEXSUBIMAGE2DARBPROC)GLimp_ExtensionPointer("glCompressedTexSubImage2D", true);
+@@ -443,6 +453,11 @@ static void R_CheckPortableExtensions()
+ 
+     // GL_EXT_texture_filter_anisotropic
+     glConfig.anisotropicFilterAvailable = R_CheckExtension("GL_EXT_texture_filter_anisotropic");
++#if defined(__EMSCRIPTEN__)
++    // Extension strings do not imply that a WebGL extension has been enabled.
++    // Keep texture setup on WebGL core parameters until extension enabling is wired.
++    glConfig.anisotropicFilterAvailable = false;
++#endif
+     if (glConfig.anisotropicFilterAvailable) {
+         qglGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &glConfig.maxTextureAnisotropy);
+         common->Printf("   maxTextureAnisotropy: %f\n", glConfig.maxTextureAnisotropy);
+@@ -454,6 +469,11 @@ static void R_CheckPortableExtensions()
+     // The actual extension is broken as specificed, storing the state in the texture unit instead
+     // of the texture object.  The behavior in GL 1.4 is the behavior we use.
+     glConfig.textureLODBiasAvailable = !isGLES && (glConfig.glVersion >= 1.4 || R_CheckExtension("GL_EXT_texture_lod_bias"));
++#if defined(__EMSCRIPTEN__)
++    // The legacy renderer assumes desktop GL when parsing the browser's GL-like
++    // version string; WebGL2 does not expose GL_TEXTURE_LOD_BIAS_EXT.
++    glConfig.textureLODBiasAvailable = false;
++#endif
+     if (glConfig.textureLODBiasAvailable) {
+         common->Printf("...using %s\n", "GL_EXT_texture_lod_bias");
+     } else {
+@@ -511,6 +531,11 @@ static void R_CheckPortableExtensions()
+         glConfig.drawElementsBaseVertexAvailable = true;
+         qglDrawElementsBaseVertex = (PFNGLDRAWELEMENTSBASEVERTEXPROC)GLimp_ExtensionPointer("glDrawElementsBaseVertexOES");
+     }
++#if defined(__EMSCRIPTEN__)
++    // WebGL 2 lacks base-vertex draws. tr_backend_draw emulates them by rebasing
++    // vertex attribute offsets for every draw, so this legacy capability gate passes.
++    glConfig.drawElementsBaseVertexAvailable = true;
++#endif
+ 
+     // GL_ARB_vertex_program / GL_ARB_fragment_program
+     glConfig.fragmentProgramAvailable = isGLES || glConfig.glVersion >= 3.0 || R_CheckExtension("GL_ARB_fragment_program");
+@@ -582,6 +607,11 @@ static void R_CheckPortableExtensions()
+     // GL_ARB_sync
+     glConfig.syncAvailable = (glConfig.glVersion >= 3.0 || R_CheckExtension("GL_ARB_sync")) &&
+         (glConfig.vendor != VENDOR_INTEL || r_skipIntelWorkarounds.GetBool());
++#if defined(__EMSCRIPTEN__)
++    // Browser WebGL contexts use implicit presentation and do not need the
++    // desktop fence loop used to wait for a physical swap interval.
++    glConfig.syncAvailable = false;
++#endif
+     if (glConfig.syncAvailable) {
+         qglFenceSync = (PFNGLFENCESYNCPROC)GLimp_ExtensionPointer("glFenceSync");
+         qglIsSync = (PFNGLISSYNCPROC)GLimp_ExtensionPointer("glIsSync");
+@@ -605,6 +635,11 @@ static void R_CheckPortableExtensions()
+ 
+     // GL_ARB_timer_query
+     glConfig.timerQueryAvailable = R_CheckExtension("GL_ARB_timer_query") || R_CheckExtension("GL_EXT_timer_query");
++#if defined(__EMSCRIPTEN__)
++    // EXT_disjoint_timer_query_webgl2 is optional and not interchangeable with
++    // the desktop GL_TIME_ELAPSED path used by this backend.
++    glConfig.timerQueryAvailable = false;
++#endif
+     if (glConfig.timerQueryAvailable) {
+         qglGetQueryObjectui64vEXT = (PFNGLGETQUERYOBJECTUI64VEXTPROC)GLimp_ExtensionPointer("glGetQueryObjectui64v", true);
+         if (qglGetQueryObjectui64vEXT == NULL) {
+@@ -649,8 +679,10 @@ static void R_CheckPortableExtensions()
+     if (!glConfig.multitextureAvailable) {
+         idLib::Error("GL_ARB_multitexture not available");
+     }
+     // GL_ARB_texture_compression + GL_EXT_texture_compression_s3tc
++#if !defined(__EMSCRIPTEN__)
+     if (!glConfig.textureCompressionAvailable) {
+         idLib::Error("GL_ARB_texture_compression or GL_EXT_texture_compression_s3tc not available");
+     }
++#endif
+     // GL_ARB_vertex_buffer_object
+@@ -912,6 +949,14 @@ void R_InitOpenGL()
+         glConfig.glVersion = atof(glConfig.version_string);
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    // The renderer's native parser sees WebGL 2.0 before the embedded GLES 3.0
++    // string and reports 2.0. WebGL 2 implements the GLES 3.0 feature set.
++    if (strstr(glConfig.version_string, "WebGL 2.") != NULL) {
++        glConfig.glVersion = 3.0f;
++    }
++#endif
++
+     if (glConfig.driverType == GLDRV_OPENGL_ES2 && glConfig.glVersion >= 3.0f)
+     {
+         glConfig.driverType = GLDRV_OPENGL_ES3;
+@@ -1958,14 +1998,24 @@ R_InitMaterials
+ */
+ void R_InitMaterials()
+ {
++    common->Printf("[web-port trace] FindMaterial _default begin\n");
+     tr.defaultMaterial = declManager->FindMaterial("_default", false);
++    common->Printf("[web-port trace] FindMaterial _default complete\n");
+     if (!tr.defaultMaterial) {
+         common->FatalError("_default material not found");
+     }
++    common->Printf("[web-port trace] FindMaterial defaultPointLight begin\n");
+     tr.defaultPointLight = declManager->FindMaterial("lights/defaultPointLight");
++    common->Printf("[web-port trace] FindMaterial defaultPointLight complete\n");
++    common->Printf("[web-port trace] FindMaterial defaultProjectedLight begin\n");
+     tr.defaultProjectedLight = declManager->FindMaterial("lights/defaultProjectedLight");
++    common->Printf("[web-port trace] FindMaterial defaultProjectedLight complete\n");
++    common->Printf("[web-port trace] FindMaterial _white begin\n");
+     tr.whiteMaterial = declManager->FindMaterial("_white");
++    common->Printf("[web-port trace] FindMaterial _white complete\n");
++    common->Printf("[web-port trace] FindMaterial bigchars begin\n");
+     tr.charSetMaterial = declManager->FindMaterial("textures/bigchars");
++    common->Printf("[web-port trace] FindMaterial bigchars complete\n");
+ }
+ 
+ /*
+@@ -2309,6 +2359,11 @@ idRenderSystemLocal::Init
+ void idRenderSystemLocal::Init()
+ {
+ 
++#if defined(__EMSCRIPTEN__)
++    idLib::SetCurrentThreadAsMain();
++    common->Printf("[web-port trace] renderer init thread=%lu main=%d\n", (unsigned long)pthread_self(), idLib::IsMainThread() ? 1 : 0);
++#endif
++
+     common->Printf("------- Initializing renderSystem --------\n");
+ 
+     // clear all our internal state
+@@ -2324,23 +2379,31 @@ void idRenderSystemLocal::Init()
+     memset(&backEnd, 0, sizeof(backEnd));
+ 
+     R_InitCvars();
++    common->Printf("[web-port trace] R_InitCvars complete\n");
+ 
+     R_InitCommands();
++    common->Printf("[web-port trace] R_InitCommands complete\n");
+ 
+     guiModel = new (TAG_RENDER) idGuiModel;
+     guiModel->Clear();
+     tr_guiModel = guiModel; // for DeviceContext fast path
+ 
++    common->Printf("[web-port trace] globalImages Init begin\n");
+     globalImages->Init();
++    common->Printf("[web-port trace] globalImages Init complete\n");
+ 
+     idCinematic::InitCinematic();
++    common->Printf("[web-port trace] InitCinematic complete\n");
+ 
+     // build brightness translation tables
+     R_SetColorMappings();
++    common->Printf("[web-port trace] R_SetColorMappings complete\n");
+ 
+     R_InitMaterials();
++    common->Printf("[web-port trace] R_InitMaterials complete\n");
+ 
+     renderModelManager->Init();
++    common->Printf("[web-port trace] renderModelManager Init complete\n");
+ 
+     // set the identity space
+     identitySpace.modelMatrix[0 * 4 + 0] = 1.0f;
+@@ -2350,14 +2413,17 @@ void idRenderSystemLocal::Init()
+     // make sure the tr.unitSquareTriangles data is current in the vertex / index cache
+     if (unitSquareTriangles == NULL) {
+         unitSquareTriangles = R_MakeFullScreenTris();
++        common->Printf("[web-port trace] full-screen tris complete\n");
+     }
+     // make sure the tr.zeroOneCubeTriangles data is current in the vertex / index cache
+     if (zeroOneCubeTriangles == NULL) {
+         zeroOneCubeTriangles = R_MakeZeroOneCubeTris();
++        common->Printf("[web-port trace] unit cube tris complete\n");
+     }
+     // make sure the tr.testImageTriangles data is current in the vertex / index cache
+     if (testImageTriangles == NULL) {
+         testImageTriangles = R_MakeTestImageTriangles();
++        common->Printf("[web-port trace] test image tris complete\n");
+     }
+ 
+     frontEndJobList = parallelJobManager->AllocJobList(JOBLIST_RENDERER_FRONTEND, JOBLIST_PRIORITY_MEDIUM, 2048, 0, NULL);
+@@ -2506,6 +2572,7 @@ idRenderSystemLocal::RegisterFont
+ idFont* idRenderSystemLocal::RegisterFont(const char* fontName)
+ {
+ 
++    common->Printf("[web-port trace] RegisterFont begin '%s'\n", fontName);
+     idStrStatic<MAX_OSPATH> baseFontName = fontName;
+     baseFontName.Replace("fonts/", "");
+     for (int i = 0; i < fonts.Num(); i++) {
+@@ -2515,6 +2582,7 @@ idFont* idRenderSystemLocal::RegisterFont(const char* fontName)
+         }
+     }
+     idFont* newFont = new (TAG_FONT) idFont(baseFontName);
++    common->Printf("[web-port trace] RegisterFont complete '%s'\n", fontName);
+     fonts.Append(newFont);
+     return newFont;
+ }
+diff --git a/neo/renderer/tr_backend_draw.cpp b/neo/renderer/tr_backend_draw.cpp
+index 612ed45..f90748e 100644
+--- a/neo/renderer/tr_backend_draw.cpp
++++ b/neo/renderer/tr_backend_draw.cpp
+@@ -33,6 +33,10 @@ If you have questions concerning this license or the applicable additional terms
+ 
+ #include "tr_local.h"
+ 
++#if defined(__EMSCRIPTEN__)
++extern "C" void APIENTRY glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, GLvoid* data);
++#endif
++
+ idCVar r_drawEyeColor("r_drawEyeColor", "0", CVAR_RENDERER | CVAR_BOOL, "Draw a colored box, red = left eye, blue = right eye, grey = non-stereo");
+ idCVar r_motionBlur("r_motionBlur", "0", CVAR_RENDERER | CVAR_INTEGER | CVAR_ARCHIVE, "1 - 5, log2 of the number of motion blur samples");
+ idCVar r_forceZPassStencilShadows("r_forceZPassStencilShadows", "0", CVAR_RENDERER | CVAR_BOOL, "force Z-pass rendering for performance testing");
+@@ -40,6 +44,7 @@ idCVar r_useStencilShadowPreload("r_useStencilShadowPreload", "1", CVAR_RENDERER
+ idCVar r_skipShaderPasses("r_skipShaderPasses", "0", CVAR_RENDERER | CVAR_BOOL, "");
+ idCVar r_skipInteractionFastPath("r_skipInteractionFastPath", "1", CVAR_RENDERER | CVAR_BOOL, "");
+ idCVar r_useLightStencilSelect("r_useLightStencilSelect", "0", CVAR_RENDERER | CVAR_BOOL, "use stencil select pass");
++idCVar r_webPortDrawTrace("r_webPortDrawTrace", "0", CVAR_RENDERER | CVAR_BOOL, "trace a few opaque WebGL draws for browser renderer debugging");
+ 
+ extern idCVar stereoRender_swapEyes;
+ 
+@@ -205,11 +210,93 @@ void RB_DrawElementsWithCounters(const drawSurf_t* surf)
+     renderProgManager.CommitUniforms();
+ 
+     // RB: 64 bit fixes, changed GLuint to GLintptrARB
++#if defined(__EMSCRIPTEN__)
++    // Buffer uploads can mutate GL bindings without updating the renderer cache.
++    // Rebind before every WebGL draw so the EBO matches the submitted offsets.
++    qglBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, (GLintptrARB)indexBuffer->GetAPIObject());
++    backEnd.glState.currentIndexBuffer = (GLintptrARB)indexBuffer->GetAPIObject();
++#else
+     if (backEnd.glState.currentIndexBuffer != (GLintptrARB)indexBuffer->GetAPIObject() || !r_useStateCaching.GetBool()) {
+         qglBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, (GLintptrARB)indexBuffer->GetAPIObject());
+         backEnd.glState.currentIndexBuffer = (GLintptrARB)indexBuffer->GetAPIObject();
+     }
++#endif
++
++#if defined(__EMSCRIPTEN__)
++    // glVertexAttribPointer captures the active ARRAY_BUFFER. Streaming uploads
++    // can change GL state without updating the renderer cache.
++    qglBindBufferARB(GL_ARRAY_BUFFER_ARB, (GLintptrARB)vertexBuffer->GetAPIObject());
++    if ((backEnd.glState.vertexLayout != LAYOUT_DRAW_VERT) || (backEnd.glState.currentVertexBuffer != (GLintptrARB)vertexBuffer->GetAPIObject()) || !r_useStateCaching.GetBool()) {
++        backEnd.glState.currentVertexBuffer = (GLintptrARB)vertexBuffer->GetAPIObject();
++
++        qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_VERTEX);
++        qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_NORMAL);
++        qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_COLOR);
++        qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_COLOR2);
++        qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_ST);
++        qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_TANGENT);
+ 
++        backEnd.glState.vertexLayout = LAYOUT_DRAW_VERT;
++    }
++    // WebGL 2 has no base-vertex draw. Rebase attribute pointers instead.
++    qglVertexAttribPointerARB(PC_ATTRIB_INDEX_VERTEX, 3, GL_FLOAT, GL_FALSE, sizeof(idDrawVert), (void*)(vertOffset + DRAWVERT_XYZ_OFFSET));
++    qglVertexAttribPointerARB(PC_ATTRIB_INDEX_NORMAL, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(idDrawVert), (void*)(vertOffset + DRAWVERT_NORMAL_OFFSET));
++    qglVertexAttribPointerARB(PC_ATTRIB_INDEX_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(idDrawVert), (void*)(vertOffset + DRAWVERT_COLOR_OFFSET));
++    qglVertexAttribPointerARB(PC_ATTRIB_INDEX_COLOR2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(idDrawVert), (void*)(vertOffset + DRAWVERT_COLOR2_OFFSET));
++    qglVertexAttribPointerARB(PC_ATTRIB_INDEX_ST, 2, GL_HALF_FLOAT, GL_FALSE, sizeof(idDrawVert), (void*)(vertOffset + DRAWVERT_ST_OFFSET));
++    qglVertexAttribPointerARB(PC_ATTRIB_INDEX_TANGENT, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(idDrawVert), (void*)(vertOffset + DRAWVERT_TANGENT_OFFSET));
++
++#if defined(__EMSCRIPTEN__)
++    static int webPortDrawTraceCount = 0;
++    const bool traceWebPortDraw = r_webPortDrawTrace.GetBool() && webPortDrawTraceCount < 8 && surf->numIndexes >= 60 && surf->material != NULL && surf->material->GetSort() == SS_OPAQUE;
++    if (traceWebPortDraw) {
++        const GLenum errorBeforeTrace = qglGetError();
++        GLint arrayBufferBinding = -1;
++        GLint elementBufferBinding = -1;
++        GLint vertexBufferBytes = -1;
++        GLint indexBufferBytes = -1;
++        qglGetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBufferBinding);
++        qglGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &elementBufferBinding);
++        if (qglGetBufferParameterivARB != NULL) {
++            qglGetBufferParameterivARB(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &vertexBufferBytes);
++            qglGetBufferParameterivARB(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_SIZE, &indexBufferBytes);
++        }
++
++        triIndex_t firstIndexes[3] = { 0, 0, 0 };
++        float firstPositions[3][3] = { { 0.0f } };
++        const GLintptrARB indexReadEnd = indexOffset + (GLintptrARB)sizeof(firstIndexes);
++        const bool indexReadValid = indexOffset >= 0 && indexReadEnd <= indexBufferBytes;
++        bool canReadBackBuffers = false;
++        if (indexReadValid) {
++            glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER, (GLintptr)indexOffset, (GLsizeiptr)sizeof(firstIndexes), firstIndexes);
++            canReadBackBuffers = true;
++            for (int i = 0; i < 3; ++i) {
++                const GLintptrARB positionOffset = (GLintptrARB)vertOffset + (GLintptrARB)firstIndexes[i] * sizeof(idDrawVert) + DRAWVERT_XYZ_OFFSET;
++                if (positionOffset >= 0 && positionOffset + (GLintptrARB)sizeof(firstPositions[i]) <= vertexBufferBytes) {
++                    glGetBufferSubData(GL_ARRAY_BUFFER, (GLintptr)positionOffset, (GLsizeiptr)sizeof(firstPositions[i]), firstPositions[i]);
++                }
++            }
++        }
++        const GLenum errorAfterTrace = qglGetError();
++        const GLuint expectedArrayBuffer = (GLuint)reinterpret_cast<GLintptrARB>(vertexBuffer->GetAPIObject());
++        const GLuint expectedElementBuffer = (GLuint)reinterpret_cast<GLintptrARB>(indexBuffer->GetAPIObject());
++        idLib::Printf("[web-port render] draw=%d material=%s sort=%.1f indexes=%d array=%d/%u vertexBytes=%d vertexOffset=%d stride=%u aligned=%d element=%d/%u indexBytes=%d indexOffset=%lld indexRangeValid=%d readback=%d first=%u,%u,%u xyz=(%.3f,%.3f,%.3f);(%.3f,%.3f,%.3f);(%.3f,%.3f,%.3f) priorError=0x%04x traceError=0x%04x\n",
++            webPortDrawTraceCount + 1,
++            surf->material != NULL ? surf->material->GetName() : "(null)",
++            surf->material != NULL ? surf->material->GetSort() : -999.0f,
++            surf->numIndexes,
++            arrayBufferBinding, expectedArrayBuffer,
++            vertexBufferBytes, vertOffset, (unsigned int)sizeof(idDrawVert), vertOffset % sizeof(idDrawVert) == 0,
++            elementBufferBinding, expectedElementBuffer,
++            indexBufferBytes, (long long)indexOffset, indexReadValid, canReadBackBuffers,
++            (unsigned int)firstIndexes[0], (unsigned int)firstIndexes[1], (unsigned int)firstIndexes[2],
++            firstPositions[0][0], firstPositions[0][1], firstPositions[0][2],
++            firstPositions[1][0], firstPositions[1][1], firstPositions[1][2],
++            firstPositions[2][0], firstPositions[2][1], firstPositions[2][2],
++            (unsigned int)errorBeforeTrace, (unsigned int)errorAfterTrace);
++    }
++#endif
++#else
+     if ((backEnd.glState.vertexLayout != LAYOUT_DRAW_VERT) || (backEnd.glState.currentVertexBuffer != (GLintptrARB)vertexBuffer->GetAPIObject()) || !r_useStateCaching.GetBool()) {
+         qglBindBufferARB(GL_ARRAY_BUFFER_ARB, (GLintptrARB)vertexBuffer->GetAPIObject());
+         backEnd.glState.currentVertexBuffer = (GLintptrARB)vertexBuffer->GetAPIObject();
+@@ -230,13 +317,26 @@ void RB_DrawElementsWithCounters(const drawSurf_t* surf)
+ 
+         backEnd.glState.vertexLayout = LAYOUT_DRAW_VERT;
+     }
++#endif
+     // RB end
+ 
++#if defined(__EMSCRIPTEN__)
++    qglDrawElements(GL_TRIANGLES,
++        r_singleTriangle.GetBool() ? 3 : surf->numIndexes,
++        GL_INDEX_TYPE,
++        (triIndex_t*)indexOffset);
++    if (traceWebPortDraw) {
++        const GLenum drawError = qglGetError();
++        idLib::Printf("[web-port render] draw=%d glDrawElements error=0x%04x\n", webPortDrawTraceCount + 1, (unsigned int)drawError);
++        ++webPortDrawTraceCount;
++    }
++#else
+     qglDrawElementsBaseVertex(GL_TRIANGLES,
+         r_singleTriangle.GetBool() ? 3 : surf->numIndexes,
+         GL_INDEX_TYPE,
+         (triIndex_t*)indexOffset,
+         vertOffset / sizeof(idDrawVert));
++#endif
+ 
+     // RB: added stats
+     backEnd.pc.c_drawElements++;
+@@ -1540,10 +1640,16 @@ static void RB_StencilShadowPass(const drawSurf_t* drawSurfs, const viewLight_t*
+         RENDERLOG_PRINTF("Binding Buffers: %p %p\n", vertexBuffer, indexBuffer);
+ 
+         // RB: 64 bit fixes, changed GLuint to GLintptrARB
++#if defined(__EMSCRIPTEN__)
++        // Keep the index binding coherent with the index offset on WebGL draws.
++        qglBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, (GLintptrARB)indexBuffer->GetAPIObject());
++        backEnd.glState.currentIndexBuffer = (GLintptrARB)indexBuffer->GetAPIObject();
++#else
+         if (backEnd.glState.currentIndexBuffer != (GLintptrARB)indexBuffer->GetAPIObject() || !r_useStateCaching.GetBool()) {
+             qglBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, (GLintptrARB)indexBuffer->GetAPIObject());
+             backEnd.glState.currentIndexBuffer = (GLintptrARB)indexBuffer->GetAPIObject();
+         }
++#endif
+ 
+         if (drawSurf->jointCache) {
+             assert(renderProgManager.ShaderUsesJoints());
+@@ -1558,6 +1664,25 @@ static void RB_StencilShadowPass(const drawSurf_t* drawSurfs, const viewLight_t*
+             const GLintptrARB ubo = reinterpret_cast<GLintptrARB>(jointBuffer.GetAPIObject());
+             qglBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, jointBuffer.GetOffset(), jointBuffer.GetNumJoints() * sizeof(idJointMat));
+ 
++#if defined(__EMSCRIPTEN__)
++            // Rebind before rebasing shadow attributes; WebGL captures this buffer.
++            qglBindBufferARB(GL_ARRAY_BUFFER_ARB, (GLintptrARB)vertexBuffer->GetAPIObject());
++            if ((backEnd.glState.vertexLayout != LAYOUT_DRAW_SHADOW_VERT_SKINNED) || (backEnd.glState.currentVertexBuffer != (GLintptrARB)vertexBuffer->GetAPIObject()) || !r_useStateCaching.GetBool()) {
++                backEnd.glState.currentVertexBuffer = (GLintptrARB)vertexBuffer->GetAPIObject();
++
++                qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_VERTEX);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_NORMAL);
++                qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_COLOR);
++                qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_COLOR2);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_ST);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_TANGENT);
++
++                backEnd.glState.vertexLayout = LAYOUT_DRAW_SHADOW_VERT_SKINNED;
++            }
++            qglVertexAttribPointerARB(PC_ATTRIB_INDEX_VERTEX, 4, GL_FLOAT, GL_FALSE, sizeof(idShadowVertSkinned), (void*)(vertOffset + SHADOWVERTSKINNED_XYZW_OFFSET));
++            qglVertexAttribPointerARB(PC_ATTRIB_INDEX_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(idShadowVertSkinned), (void*)(vertOffset + SHADOWVERTSKINNED_COLOR_OFFSET));
++            qglVertexAttribPointerARB(PC_ATTRIB_INDEX_COLOR2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(idShadowVertSkinned), (void*)(vertOffset + SHADOWVERTSKINNED_COLOR2_OFFSET));
++#else
+             if ((backEnd.glState.vertexLayout != LAYOUT_DRAW_SHADOW_VERT_SKINNED) || (backEnd.glState.currentVertexBuffer != (GLintptrARB)vertexBuffer->GetAPIObject()) || !r_useStateCaching.GetBool()) {
+                 qglBindBufferARB(GL_ARRAY_BUFFER_ARB, (GLintptrARB)vertexBuffer->GetAPIObject());
+                 backEnd.glState.currentVertexBuffer = (GLintptrARB)vertexBuffer->GetAPIObject();
+@@ -1575,9 +1700,27 @@ static void RB_StencilShadowPass(const drawSurf_t* drawSurfs, const viewLight_t*
+ 
+                 backEnd.glState.vertexLayout = LAYOUT_DRAW_SHADOW_VERT_SKINNED;
+             }
++#endif
+ 
+         } else {
+ 
++#if defined(__EMSCRIPTEN__)
++            // Rebind before rebasing shadow attributes; WebGL captures this buffer.
++            qglBindBufferARB(GL_ARRAY_BUFFER_ARB, (GLintptrARB)vertexBuffer->GetAPIObject());
++            if ((backEnd.glState.vertexLayout != LAYOUT_DRAW_SHADOW_VERT) || (backEnd.glState.currentVertexBuffer != (GLintptrARB)vertexBuffer->GetAPIObject()) || !r_useStateCaching.GetBool()) {
++                backEnd.glState.currentVertexBuffer = (GLintptrARB)vertexBuffer->GetAPIObject();
++
++                qglEnableVertexAttribArrayARB(PC_ATTRIB_INDEX_VERTEX);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_NORMAL);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_COLOR);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_COLOR2);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_ST);
++                qglDisableVertexAttribArrayARB(PC_ATTRIB_INDEX_TANGENT);
++
++                backEnd.glState.vertexLayout = LAYOUT_DRAW_SHADOW_VERT;
++            }
++            qglVertexAttribPointerARB(PC_ATTRIB_INDEX_VERTEX, 4, GL_FLOAT, GL_FALSE, sizeof(idShadowVert), (void*)(vertOffset + SHADOWVERT_XYZW_OFFSET));
++#else
+             if ((backEnd.glState.vertexLayout != LAYOUT_DRAW_SHADOW_VERT) || (backEnd.glState.currentVertexBuffer != (GLintptrARB)vertexBuffer->GetAPIObject()) || !r_useStateCaching.GetBool()) {
+                 qglBindBufferARB(GL_ARRAY_BUFFER_ARB, (GLintptrARB)vertexBuffer->GetAPIObject());
+                 backEnd.glState.currentVertexBuffer = (GLintptrARB)vertexBuffer->GetAPIObject();
+@@ -1593,16 +1736,21 @@ static void RB_StencilShadowPass(const drawSurf_t* drawSurfs, const viewLight_t*
+ 
+                 backEnd.glState.vertexLayout = LAYOUT_DRAW_SHADOW_VERT;
+             }
++#endif
+         }
+         // RB end
+ 
+         renderProgManager.CommitUniforms();
+ 
++#if defined(__EMSCRIPTEN__)
++        qglDrawElements(GL_TRIANGLES, r_singleTriangle.GetBool() ? 3 : drawSurf->numIndexes, GL_INDEX_TYPE, (triIndex_t*)indexOffset);
++#else
+         if (drawSurf->jointCache) {
+             qglDrawElementsBaseVertex(GL_TRIANGLES, r_singleTriangle.GetBool() ? 3 : drawSurf->numIndexes, GL_INDEX_TYPE, (triIndex_t*)indexOffset, vertOffset / sizeof(idShadowVertSkinned));
+         } else {
+             qglDrawElementsBaseVertex(GL_TRIANGLES, r_singleTriangle.GetBool() ? 3 : drawSurf->numIndexes, GL_INDEX_TYPE, (triIndex_t*)indexOffset, vertOffset / sizeof(idShadowVert));
+         }
++#endif
+ 
+         // RB: added stats
+         backEnd.pc.c_shadowElements++;
+@@ -1614,11 +1762,15 @@ static void RB_StencilShadowPass(const drawSurf_t* drawSurfs, const viewLight_t*
+             qglStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR);
+             qglStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR);
+ 
++#if defined(__EMSCRIPTEN__)
++            qglDrawElements(GL_TRIANGLES, r_singleTriangle.GetBool() ? 3 : drawSurf->numIndexes, GL_INDEX_TYPE, (triIndex_t*)indexOffset);
++#else
+             if (drawSurf->jointCache) {
+                 qglDrawElementsBaseVertex(GL_TRIANGLES, r_singleTriangle.GetBool() ? 3 : drawSurf->numIndexes, GL_INDEX_TYPE, (triIndex_t*)indexOffset, vertOffset / sizeof(idShadowVertSkinned));
+             } else {
+                 qglDrawElementsBaseVertex(GL_TRIANGLES, r_singleTriangle.GetBool() ? 3 : drawSurf->numIndexes, GL_INDEX_TYPE, (triIndex_t*)indexOffset, vertOffset / sizeof(idShadowVert));
+             }
++#endif
+ 
+             // RB: added stats
+             backEnd.pc.c_shadowElements++;
+
+diff --git a/neo/renderer/tr_backend_rendertools.cpp b/neo/renderer/tr_backend_rendertools.cpp
+index 4b66b6a..580bc40 100644
+--- a/neo/renderer/tr_backend_rendertools.cpp
++++ b/neo/renderer/tr_backend_rendertools.cpp
+@@ -614,7 +614,7 @@ does a glLoadMatrixf after optionally applying the low-latency bypass matrix
+ */
+ static void RB_LoadMatrixWithBypass(const float m[16])
+ {
+-    glLoadMatrixf(m);
++    qglLoadMatrixf(m);
+ }
+ 
+ /*
+diff --git a/neo/sys/common/socket_net.cpp b/neo/sys/common/socket_net.cpp
+index 3fb93a9..08e0547 100644
+--- a/neo/sys/common/socket_net.cpp
++++ b/neo/sys/common/socket_net.cpp
+@@ -790,6 +790,12 @@ Sys_InitNetworking
+ */
+ void Sys_InitNetworking()
+ {
++#if defined(__EMSCRIPTEN__)
++    // Browser builds have no raw sockets or network-interface enumeration.
++    // The WebAssembly port currently targets local single-player only.
++    num_interfaces = 0;
++    return;
++#else
+ 
+     bool foundloopback = false;
+ 
+@@ -1005,6 +1011,7 @@ void Sys_InitNetworking()
+         netint[num_interfaces].mask = ntohl(inet_addr("255.0.0.0"));
+         num_interfaces++;
+     }
++#endif // __EMSCRIPTEN__
+ }
+ 
+ /*
+diff --git a/neo/sys/posix/posix_main.cpp b/neo/sys/posix/posix_main.cpp
+index 9b859ea..8ab148d 100644
+--- a/neo/sys/posix/posix_main.cpp
++++ b/neo/sys/posix/posix_main.cpp
+@@ -44,6 +44,10 @@ If you have questions concerning this license or the applicable additional terms
+ #include <fcntl.h>
+ #include <fnmatch.h>
+ 
++#if defined(__EMSCRIPTEN__)
++#include <emscripten/emscripten.h>
++#endif
++
+ // RB begin
+ #if defined(__ANDROID__)
+ #include <android/log.h>
+@@ -311,6 +315,12 @@ unsigned int sys_timeBase = 0;
+ */
+ int Sys_Milliseconds()
+ {
++#if defined(__EMSCRIPTEN__)
++    // Emscripten's browser clock is synchronized across pthreads, unlike
++    // per-worker performance clocks. Keep engine frame time relative to startup.
++    static const double timeBase = emscripten_get_now();
++    return (int)(emscripten_get_now() - timeBase);
++#else
+     // DG: use clock_gettime on all platforms
+ #if 1
+     int curtime;
+@@ -344,6 +354,7 @@ int Sys_Milliseconds()
+     */
+ #endif
+     // DG end
++#endif
+ }
+ 
+ // RB: added for BFG
+@@ -353,10 +364,18 @@ int Sys_Milliseconds()
+ Sys_Microseconds
+ ================
+ */
++#if !defined(__EMSCRIPTEN__)
+ static uint64 sys_microTimeBase = 0;
++#endif
+ 
+ uint64 Sys_Microseconds()
+ {
++#if defined(__EMSCRIPTEN__)
++	// clock_gettime's lazily initialized epoch below races when pthreads enter
++	// this function concurrently. Emscripten provides a monotonic clock shared
++	// across the main thread and workers, so return its absolute microseconds.
++	return static_cast<uint64>(emscripten_get_now() * 1000.0);
++#else
+ #if 0
+ 	static uint64 ticksPerMicrosecondTimes1024 = 0;
+ 
+@@ -391,6 +402,7 @@ uint64 Sys_Microseconds()
+ 
+     curtime = (ts.tv_sec - sys_microTimeBase) * 1000000 + ts.tv_nsec / 1000;
+ 
+     return curtime;
+ #endif
++#endif
+ }
+@@ -553,7 +564,7 @@ int Sys_ListFiles(const char* directory, const char* extension, idStrList& list)
+     // NOTE: case sensitivity of directory path can screw us up here
+     if ((fdir = opendir(directory)) == NULL) {
+         if (debug) {
+-            common->Printf("Sys_ListFiles: opendir %s failed\n", directory);
++            common->Printf("Sys_ListFiles: opendir %s failed on pthread %lu (errno %d: %s)\n", directory, static_cast<unsigned long>(pthread_self()), errno, strerror(errno));
+         }
+         return -1;
+     }
+diff --git a/neo/sys/sdl/sdl_glimp.cpp b/neo/sys/sdl/sdl_glimp.cpp
+index 524a987..35f447f 100644
+--- a/neo/sys/sdl/sdl_glimp.cpp
++++ b/neo/sys/sdl/sdl_glimp.cpp
+@@ -41,6 +41,10 @@ If you have questions concerning this license or the applicable additional terms
+ #include <SDL.h>
+ #include <SDL_syswm.h>
+ 
++#if defined(__EMSCRIPTEN__)
++#include <emscripten/emscripten.h>
++#endif
++
+ #include "renderer/tr_local.h"
+ #include "sdl_local.h"
+ 
+@@ -532,6 +536,9 @@ void GLimp_SwapBuffers()
+         GLimp_ApplySwapInterval();
+     }
+     SDL_GL_SwapWindow(window);
++#if defined(__EMSCRIPTEN__)
++    emscripten_sleep(0);
++#endif
+ #else
+     SDL_GL_SwapBuffers();
+ #endif
+diff --git a/neo/sys/sdl/sdl_qgl.cpp b/neo/sys/sdl/sdl_qgl.cpp
+index 99d04e3..2d54fb2 100644
+--- a/neo/sys/sdl/sdl_qgl.cpp
++++ b/neo/sys/sdl/sdl_qgl.cpp
+@@ -53,6 +53,13 @@ void QGL_Shutdown(void)
+ }
+ #else
+ 
++#if defined(__EMSCRIPTEN__)
++#include <SDL.h>
++#define QGL_RESOLVE_CORE(name) reinterpret_cast<decltype(dll##name)>(SDL_GL_GetProcAddress("gl" #name))
++#else
++#define QGL_RESOLVE_CORE(name) gl##name
++#endif
++
+ /*
+ int ( WINAPI* qwglChoosePixelFormat )( HDC, CONST PIXELFORMATDESCRIPTOR* );
+ int ( WINAPI* qwglDescribePixelFormat )( HDC, int, UINT, LPPIXELFORMATDESCRIPTOR );
+@@ -1657,344 +1664,344 @@ bool QGL_Init(const char* dllname)
+     common->Printf( "succeeded\n" );
+     */
+ 
+-    qglAccum = dllAccum = glAccum;
+-    qglAlphaFunc = dllAlphaFunc = glAlphaFunc;
+-    qglAreTexturesResident = dllAreTexturesResident = glAreTexturesResident;
+-    qglArrayElement = dllArrayElement = glArrayElement;
+-    qglBegin = dllBegin = glBegin;
+-    qglBindTexture = dllBindTexture = glBindTexture;
+-    qglBitmap = dllBitmap = glBitmap;
+-    qglBlendFunc = dllBlendFunc = glBlendFunc;
+-    qglCallList = dllCallList = glCallList;
+-    qglCallLists = dllCallLists = glCallLists;
+-    qglClear = dllClear = glClear;
+-    qglClearAccum = dllClearAccum = glClearAccum;
+-    qglClearColor = dllClearColor = glClearColor;
+-    qglClearDepth = dllClearDepth = glClearDepth;
+-    qglClearIndex = dllClearIndex = glClearIndex;
+-    qglClearStencil = dllClearStencil = glClearStencil;
+-    qglClipPlane = dllClipPlane = glClipPlane;
+-    qglColor3b = dllColor3b = glColor3b;
+-    qglColor3bv = dllColor3bv = glColor3bv;
+-    qglColor3d = dllColor3d = glColor3d;
+-    qglColor3dv = dllColor3dv = glColor3dv;
+-    qglColor3f = dllColor3f = glColor3f;
+-    qglColor3fv = dllColor3fv = glColor3fv;
+-    qglColor3i = dllColor3i = glColor3i;
+-    qglColor3iv = dllColor3iv = glColor3iv;
+-    qglColor3s = dllColor3s = glColor3s;
+-    qglColor3sv = dllColor3sv = glColor3sv;
+-    qglColor3ub = dllColor3ub = glColor3ub;
+-    qglColor3ubv = dllColor3ubv = glColor3ubv;
+-    qglColor3ui = dllColor3ui = glColor3ui;
+-    qglColor3uiv = dllColor3uiv = glColor3uiv;
+-    qglColor3us = dllColor3us = glColor3us;
+-    qglColor3usv = dllColor3usv = glColor3usv;
+-    qglColor4b = dllColor4b = glColor4b;
+-    qglColor4bv = dllColor4bv = glColor4bv;
+-    qglColor4d = dllColor4d = glColor4d;
+-    qglColor4dv = dllColor4dv = glColor4dv;
+-    qglColor4f = dllColor4f = glColor4f;
+-    qglColor4fv = dllColor4fv = glColor4fv;
+-    qglColor4i = dllColor4i = glColor4i;
+-    qglColor4iv = dllColor4iv = glColor4iv;
+-    qglColor4s = dllColor4s = glColor4s;
+-    qglColor4sv = dllColor4sv = glColor4sv;
+-    qglColor4ub = dllColor4ub = glColor4ub;
+-    qglColor4ubv = dllColor4ubv = glColor4ubv;
+-    qglColor4ui = dllColor4ui = glColor4ui;
+-    qglColor4uiv = dllColor4uiv = glColor4uiv;
+-    qglColor4us = dllColor4us = glColor4us;
+-    qglColor4usv = dllColor4usv = glColor4usv;
+-    qglColorMask = dllColorMask = glColorMask;
+-    qglColorMaterial = dllColorMaterial = glColorMaterial;
+-    qglColorPointer = dllColorPointer = glColorPointer;
+-    qglCopyPixels = dllCopyPixels = glCopyPixels;
+-    qglCopyTexImage1D = dllCopyTexImage1D = glCopyTexImage1D;
+-    qglCopyTexImage2D = dllCopyTexImage2D = glCopyTexImage2D;
+-    qglCopyTexSubImage1D = dllCopyTexSubImage1D = glCopyTexSubImage1D;
+-    qglCopyTexSubImage2D = dllCopyTexSubImage2D = glCopyTexSubImage2D;
+-    qglCullFace = dllCullFace = glCullFace;
+-    qglDeleteLists = dllDeleteLists = glDeleteLists;
+-    qglDeleteTextures = dllDeleteTextures = glDeleteTextures;
+-    qglDepthFunc = dllDepthFunc = glDepthFunc;
+-    qglDepthMask = dllDepthMask = glDepthMask;
+-    qglDepthRange = dllDepthRange = glDepthRange;
+-    qglDisable = dllDisable = glDisable;
+-    qglDisableClientState = dllDisableClientState = glDisableClientState;
+-    qglDrawArrays = dllDrawArrays = glDrawArrays;
+-    qglDrawBuffer = dllDrawBuffer = glDrawBuffer;
+-    qglDrawElements = dllDrawElements = glDrawElements;
+-    qglDrawPixels = dllDrawPixels = glDrawPixels;
+-    qglEdgeFlag = dllEdgeFlag = glEdgeFlag;
+-    qglEdgeFlagPointer = dllEdgeFlagPointer = glEdgeFlagPointer;
+-    qglEdgeFlagv = dllEdgeFlagv = glEdgeFlagv;
+-    qglEnable = dllEnable = glEnable;
+-    qglEnableClientState = dllEnableClientState = glEnableClientState;
+-    qglEnd = dllEnd = glEnd;
+-    qglEndList = dllEndList = glEndList;
+-    qglEvalCoord1d = dllEvalCoord1d = glEvalCoord1d;
+-    qglEvalCoord1dv = dllEvalCoord1dv = glEvalCoord1dv;
+-    qglEvalCoord1f = dllEvalCoord1f = glEvalCoord1f;
+-    qglEvalCoord1fv = dllEvalCoord1fv = glEvalCoord1fv;
+-    qglEvalCoord2d = dllEvalCoord2d = glEvalCoord2d;
+-    qglEvalCoord2dv = dllEvalCoord2dv = glEvalCoord2dv;
+-    qglEvalCoord2f = dllEvalCoord2f = glEvalCoord2f;
+-    qglEvalCoord2fv = dllEvalCoord2fv = glEvalCoord2fv;
+-    qglEvalMesh1 = dllEvalMesh1 = glEvalMesh1;
+-    qglEvalMesh2 = dllEvalMesh2 = glEvalMesh2;
+-    qglEvalPoint1 = dllEvalPoint1 = glEvalPoint1;
+-    qglEvalPoint2 = dllEvalPoint2 = glEvalPoint2;
+-    qglFeedbackBuffer = dllFeedbackBuffer = glFeedbackBuffer;
+-    qglFinish = dllFinish = glFinish;
+-    qglFlush = dllFlush = glFlush;
+-    qglFogf = dllFogf = glFogf;
+-    qglFogfv = dllFogfv = glFogfv;
+-    qglFogi = dllFogi = glFogi;
+-    qglFogiv = dllFogiv = glFogiv;
+-    qglFrontFace = dllFrontFace = glFrontFace;
+-    qglFrustum = dllFrustum = glFrustum;
+-    qglGenLists = dllGenLists = glGenLists;
+-    qglGenTextures = dllGenTextures = glGenTextures;
+-    qglGetBooleanv = dllGetBooleanv = glGetBooleanv;
+-    qglGetClipPlane = dllGetClipPlane = glGetClipPlane;
+-    qglGetDoublev = dllGetDoublev = glGetDoublev;
+-    qglGetError = dllGetError = glGetError;
+-    qglGetFloatv = dllGetFloatv = glGetFloatv;
+-    qglGetIntegerv = dllGetIntegerv = glGetIntegerv;
+-    qglGetLightfv = dllGetLightfv = glGetLightfv;
+-    qglGetLightiv = dllGetLightiv = glGetLightiv;
+-    qglGetMapdv = dllGetMapdv = glGetMapdv;
+-    qglGetMapfv = dllGetMapfv = glGetMapfv;
+-    qglGetMapiv = dllGetMapiv = glGetMapiv;
+-    qglGetMaterialfv = dllGetMaterialfv = glGetMaterialfv;
+-    qglGetMaterialiv = dllGetMaterialiv = glGetMaterialiv;
+-    qglGetPixelMapfv = dllGetPixelMapfv = glGetPixelMapfv;
+-    qglGetPixelMapuiv = dllGetPixelMapuiv = glGetPixelMapuiv;
+-    qglGetPixelMapusv = dllGetPixelMapusv = glGetPixelMapusv;
+-    qglGetPointerv = dllGetPointerv = glGetPointerv;
+-    qglGetPolygonStipple = dllGetPolygonStipple = glGetPolygonStipple;
+-    qglGetString = dllGetString = glGetString;
+-    qglGetTexEnvfv = dllGetTexEnvfv = glGetTexEnvfv;
+-    qglGetTexEnviv = dllGetTexEnviv = glGetTexEnviv;
+-    qglGetTexGendv = dllGetTexGendv = glGetTexGendv;
+-    qglGetTexGenfv = dllGetTexGenfv = glGetTexGenfv;
+-    qglGetTexGeniv = dllGetTexGeniv = glGetTexGeniv;
+-    qglGetTexImage = dllGetTexImage = glGetTexImage;
+-    qglGetTexLevelParameterfv = dllGetTexLevelParameterfv = glGetTexLevelParameterfv;
+-    qglGetTexLevelParameteriv = dllGetTexLevelParameteriv = glGetTexLevelParameteriv;
+-    qglGetTexParameterfv = dllGetTexParameterfv = glGetTexParameterfv;
+-    qglGetTexParameteriv = dllGetTexParameteriv = glGetTexParameteriv;
+-    qglHint = dllHint = glHint;
+-    qglIndexMask = dllIndexMask = glIndexMask;
+-    qglIndexPointer = dllIndexPointer = glIndexPointer;
+-    qglIndexd = dllIndexd = glIndexd;
+-    qglIndexdv = dllIndexdv = glIndexdv;
+-    qglIndexf = dllIndexf = glIndexf;
+-    qglIndexfv = dllIndexfv = glIndexfv;
+-    qglIndexi = dllIndexi = glIndexi;
+-    qglIndexiv = dllIndexiv = glIndexiv;
+-    qglIndexs = dllIndexs = glIndexs;
+-    qglIndexsv = dllIndexsv = glIndexsv;
+-    qglIndexub = dllIndexub = glIndexub;
+-    qglIndexubv = dllIndexubv = glIndexubv;
+-    qglInitNames = dllInitNames = glInitNames;
+-    qglInterleavedArrays = dllInterleavedArrays = glInterleavedArrays;
+-    qglIsEnabled = dllIsEnabled = glIsEnabled;
+-    qglIsList = dllIsList = glIsList;
+-    qglIsTexture = dllIsTexture = glIsTexture;
+-    qglLightModelf = dllLightModelf = glLightModelf;
+-    qglLightModelfv = dllLightModelfv = glLightModelfv;
+-    qglLightModeli = dllLightModeli = glLightModeli;
+-    qglLightModeliv = dllLightModeliv = glLightModeliv;
+-    qglLightf = dllLightf = glLightf;
+-    qglLightfv = dllLightfv = glLightfv;
+-    qglLighti = dllLighti = glLighti;
+-    qglLightiv = dllLightiv = glLightiv;
+-    qglLineStipple = dllLineStipple = glLineStipple;
+-    qglLineWidth = dllLineWidth = glLineWidth;
+-    qglListBase = dllListBase = glListBase;
+-    qglLoadIdentity = dllLoadIdentity = glLoadIdentity;
+-    qglLoadMatrixd = dllLoadMatrixd = glLoadMatrixd;
+-    qglLoadMatrixf = dllLoadMatrixf = glLoadMatrixf;
+-    qglLoadName = dllLoadName = glLoadName;
+-    qglLogicOp = dllLogicOp = glLogicOp;
+-    qglMap1d = dllMap1d = glMap1d;
+-    qglMap1f = dllMap1f = glMap1f;
+-    qglMap2d = dllMap2d = glMap2d;
+-    qglMap2f = dllMap2f = glMap2f;
+-    qglMapGrid1d = dllMapGrid1d = glMapGrid1d;
+-    qglMapGrid1f = dllMapGrid1f = glMapGrid1f;
+-    qglMapGrid2d = dllMapGrid2d = glMapGrid2d;
+-    qglMapGrid2f = dllMapGrid2f = glMapGrid2f;
+-    qglMaterialf = dllMaterialf = glMaterialf;
+-    qglMaterialfv = dllMaterialfv = glMaterialfv;
+-    qglMateriali = dllMateriali = glMateriali;
+-    qglMaterialiv = dllMaterialiv = glMaterialiv;
+-    qglMatrixMode = dllMatrixMode = glMatrixMode;
+-    qglMultMatrixd = dllMultMatrixd = glMultMatrixd;
+-    qglMultMatrixf = dllMultMatrixf = glMultMatrixf;
+-    qglNewList = dllNewList = glNewList;
+-    qglNormal3b = dllNormal3b = glNormal3b;
+-    qglNormal3bv = dllNormal3bv = glNormal3bv;
+-    qglNormal3d = dllNormal3d = glNormal3d;
+-    qglNormal3dv = dllNormal3dv = glNormal3dv;
+-    qglNormal3f = dllNormal3f = glNormal3f;
+-    qglNormal3fv = dllNormal3fv = glNormal3fv;
+-    qglNormal3i = dllNormal3i = glNormal3i;
+-    qglNormal3iv = dllNormal3iv = glNormal3iv;
+-    qglNormal3s = dllNormal3s = glNormal3s;
+-    qglNormal3sv = dllNormal3sv = glNormal3sv;
+-    qglNormalPointer = dllNormalPointer = glNormalPointer;
+-    qglOrtho = dllOrtho = glOrtho;
+-    qglPassThrough = dllPassThrough = glPassThrough;
+-    qglPixelMapfv = dllPixelMapfv = glPixelMapfv;
+-    qglPixelMapuiv = dllPixelMapuiv = glPixelMapuiv;
+-    qglPixelMapusv = dllPixelMapusv = glPixelMapusv;
+-    qglPixelStoref = dllPixelStoref = glPixelStoref;
+-    qglPixelStorei = dllPixelStorei = glPixelStorei;
+-    qglPixelTransferf = dllPixelTransferf = glPixelTransferf;
+-    qglPixelTransferi = dllPixelTransferi = glPixelTransferi;
+-    qglPixelZoom = dllPixelZoom = glPixelZoom;
+-    qglPointSize = dllPointSize = glPointSize;
+-    qglPolygonMode = dllPolygonMode = glPolygonMode;
+-    qglPolygonOffset = dllPolygonOffset = glPolygonOffset;
+-    qglPolygonStipple = dllPolygonStipple = glPolygonStipple;
+-    qglPopAttrib = dllPopAttrib = glPopAttrib;
+-    qglPopClientAttrib = dllPopClientAttrib = glPopClientAttrib;
+-    qglPopMatrix = dllPopMatrix = glPopMatrix;
+-    qglPopName = dllPopName = glPopName;
+-    qglPrioritizeTextures = dllPrioritizeTextures = glPrioritizeTextures;
+-    qglPushAttrib = dllPushAttrib = glPushAttrib;
+-    qglPushClientAttrib = dllPushClientAttrib = glPushClientAttrib;
+-    qglPushMatrix = dllPushMatrix = glPushMatrix;
+-    qglPushName = dllPushName = glPushName;
+-    qglRasterPos2d = dllRasterPos2d = glRasterPos2d;
+-    qglRasterPos2dv = dllRasterPos2dv = glRasterPos2dv;
+-    qglRasterPos2f = dllRasterPos2f = glRasterPos2f;
+-    qglRasterPos2fv = dllRasterPos2fv = glRasterPos2fv;
+-    qglRasterPos2i = dllRasterPos2i = glRasterPos2i;
+-    qglRasterPos2iv = dllRasterPos2iv = glRasterPos2iv;
+-    qglRasterPos2s = dllRasterPos2s = glRasterPos2s;
+-    qglRasterPos2sv = dllRasterPos2sv = glRasterPos2sv;
+-    qglRasterPos3d = dllRasterPos3d = glRasterPos3d;
+-    qglRasterPos3dv = dllRasterPos3dv = glRasterPos3dv;
+-    qglRasterPos3f = dllRasterPos3f = glRasterPos3f;
+-    qglRasterPos3fv = dllRasterPos3fv = glRasterPos3fv;
+-    qglRasterPos3i = dllRasterPos3i = glRasterPos3i;
+-    qglRasterPos3iv = dllRasterPos3iv = glRasterPos3iv;
+-    qglRasterPos3s = dllRasterPos3s = glRasterPos3s;
+-    qglRasterPos3sv = dllRasterPos3sv = glRasterPos3sv;
+-    qglRasterPos4d = dllRasterPos4d = glRasterPos4d;
+-    qglRasterPos4dv = dllRasterPos4dv = glRasterPos4dv;
+-    qglRasterPos4f = dllRasterPos4f = glRasterPos4f;
+-    qglRasterPos4fv = dllRasterPos4fv = glRasterPos4fv;
+-    qglRasterPos4i = dllRasterPos4i = glRasterPos4i;
+-    qglRasterPos4iv = dllRasterPos4iv = glRasterPos4iv;
+-    qglRasterPos4s = dllRasterPos4s = glRasterPos4s;
+-    qglRasterPos4sv = dllRasterPos4sv = glRasterPos4sv;
+-    qglReadBuffer = dllReadBuffer = glReadBuffer;
+-    qglReadPixels = dllReadPixels = glReadPixels;
+-    qglRectd = dllRectd = glRectd;
+-    qglRectdv = dllRectdv = glRectdv;
+-    qglRectf = dllRectf = glRectf;
+-    qglRectfv = dllRectfv = glRectfv;
+-    qglRecti = dllRecti = glRecti;
+-    qglRectiv = dllRectiv = glRectiv;
+-    qglRects = dllRects = glRects;
+-    qglRectsv = dllRectsv = glRectsv;
+-    qglRenderMode = dllRenderMode = glRenderMode;
+-    qglRotated = dllRotated = glRotated;
+-    qglRotatef = dllRotatef = glRotatef;
+-    qglScaled = dllScaled = glScaled;
+-    qglScalef = dllScalef = glScalef;
+-    qglScissor = dllScissor = glScissor;
+-    qglSelectBuffer = dllSelectBuffer = glSelectBuffer;
++    qglAccum = dllAccum = QGL_RESOLVE_CORE(Accum);
++    qglAlphaFunc = dllAlphaFunc = QGL_RESOLVE_CORE(AlphaFunc);
++    qglAreTexturesResident = dllAreTexturesResident = QGL_RESOLVE_CORE(AreTexturesResident);
++    qglArrayElement = dllArrayElement = QGL_RESOLVE_CORE(ArrayElement);
++    qglBegin = dllBegin = QGL_RESOLVE_CORE(Begin);
++    qglBindTexture = dllBindTexture = QGL_RESOLVE_CORE(BindTexture);
++    qglBitmap = dllBitmap = QGL_RESOLVE_CORE(Bitmap);
++    qglBlendFunc = dllBlendFunc = QGL_RESOLVE_CORE(BlendFunc);
++    qglCallList = dllCallList = QGL_RESOLVE_CORE(CallList);
++    qglCallLists = dllCallLists = QGL_RESOLVE_CORE(CallLists);
++    qglClear = dllClear = QGL_RESOLVE_CORE(Clear);
++    qglClearAccum = dllClearAccum = QGL_RESOLVE_CORE(ClearAccum);
++    qglClearColor = dllClearColor = QGL_RESOLVE_CORE(ClearColor);
++    qglClearDepth = dllClearDepth = QGL_RESOLVE_CORE(ClearDepth);
++    qglClearIndex = dllClearIndex = QGL_RESOLVE_CORE(ClearIndex);
++    qglClearStencil = dllClearStencil = QGL_RESOLVE_CORE(ClearStencil);
++    qglClipPlane = dllClipPlane = QGL_RESOLVE_CORE(ClipPlane);
++    qglColor3b = dllColor3b = QGL_RESOLVE_CORE(Color3b);
++    qglColor3bv = dllColor3bv = QGL_RESOLVE_CORE(Color3bv);
++    qglColor3d = dllColor3d = QGL_RESOLVE_CORE(Color3d);
++    qglColor3dv = dllColor3dv = QGL_RESOLVE_CORE(Color3dv);
++    qglColor3f = dllColor3f = QGL_RESOLVE_CORE(Color3f);
++    qglColor3fv = dllColor3fv = QGL_RESOLVE_CORE(Color3fv);
++    qglColor3i = dllColor3i = QGL_RESOLVE_CORE(Color3i);
++    qglColor3iv = dllColor3iv = QGL_RESOLVE_CORE(Color3iv);
++    qglColor3s = dllColor3s = QGL_RESOLVE_CORE(Color3s);
++    qglColor3sv = dllColor3sv = QGL_RESOLVE_CORE(Color3sv);
++    qglColor3ub = dllColor3ub = QGL_RESOLVE_CORE(Color3ub);
++    qglColor3ubv = dllColor3ubv = QGL_RESOLVE_CORE(Color3ubv);
++    qglColor3ui = dllColor3ui = QGL_RESOLVE_CORE(Color3ui);
++    qglColor3uiv = dllColor3uiv = QGL_RESOLVE_CORE(Color3uiv);
++    qglColor3us = dllColor3us = QGL_RESOLVE_CORE(Color3us);
++    qglColor3usv = dllColor3usv = QGL_RESOLVE_CORE(Color3usv);
++    qglColor4b = dllColor4b = QGL_RESOLVE_CORE(Color4b);
++    qglColor4bv = dllColor4bv = QGL_RESOLVE_CORE(Color4bv);
++    qglColor4d = dllColor4d = QGL_RESOLVE_CORE(Color4d);
++    qglColor4dv = dllColor4dv = QGL_RESOLVE_CORE(Color4dv);
++    qglColor4f = dllColor4f = QGL_RESOLVE_CORE(Color4f);
++    qglColor4fv = dllColor4fv = QGL_RESOLVE_CORE(Color4fv);
++    qglColor4i = dllColor4i = QGL_RESOLVE_CORE(Color4i);
++    qglColor4iv = dllColor4iv = QGL_RESOLVE_CORE(Color4iv);
++    qglColor4s = dllColor4s = QGL_RESOLVE_CORE(Color4s);
++    qglColor4sv = dllColor4sv = QGL_RESOLVE_CORE(Color4sv);
++    qglColor4ub = dllColor4ub = QGL_RESOLVE_CORE(Color4ub);
++    qglColor4ubv = dllColor4ubv = QGL_RESOLVE_CORE(Color4ubv);
++    qglColor4ui = dllColor4ui = QGL_RESOLVE_CORE(Color4ui);
++    qglColor4uiv = dllColor4uiv = QGL_RESOLVE_CORE(Color4uiv);
++    qglColor4us = dllColor4us = QGL_RESOLVE_CORE(Color4us);
++    qglColor4usv = dllColor4usv = QGL_RESOLVE_CORE(Color4usv);
++    qglColorMask = dllColorMask = QGL_RESOLVE_CORE(ColorMask);
++    qglColorMaterial = dllColorMaterial = QGL_RESOLVE_CORE(ColorMaterial);
++    qglColorPointer = dllColorPointer = QGL_RESOLVE_CORE(ColorPointer);
++    qglCopyPixels = dllCopyPixels = QGL_RESOLVE_CORE(CopyPixels);
++    qglCopyTexImage1D = dllCopyTexImage1D = QGL_RESOLVE_CORE(CopyTexImage1D);
++    qglCopyTexImage2D = dllCopyTexImage2D = QGL_RESOLVE_CORE(CopyTexImage2D);
++    qglCopyTexSubImage1D = dllCopyTexSubImage1D = QGL_RESOLVE_CORE(CopyTexSubImage1D);
++    qglCopyTexSubImage2D = dllCopyTexSubImage2D = QGL_RESOLVE_CORE(CopyTexSubImage2D);
++    qglCullFace = dllCullFace = QGL_RESOLVE_CORE(CullFace);
++    qglDeleteLists = dllDeleteLists = QGL_RESOLVE_CORE(DeleteLists);
++    qglDeleteTextures = dllDeleteTextures = QGL_RESOLVE_CORE(DeleteTextures);
++    qglDepthFunc = dllDepthFunc = QGL_RESOLVE_CORE(DepthFunc);
++    qglDepthMask = dllDepthMask = QGL_RESOLVE_CORE(DepthMask);
++    qglDepthRange = dllDepthRange = QGL_RESOLVE_CORE(DepthRange);
++    qglDisable = dllDisable = QGL_RESOLVE_CORE(Disable);
++    qglDisableClientState = dllDisableClientState = QGL_RESOLVE_CORE(DisableClientState);
++    qglDrawArrays = dllDrawArrays = QGL_RESOLVE_CORE(DrawArrays);
++    qglDrawBuffer = dllDrawBuffer = QGL_RESOLVE_CORE(DrawBuffer);
++    qglDrawElements = dllDrawElements = QGL_RESOLVE_CORE(DrawElements);
++    qglDrawPixels = dllDrawPixels = QGL_RESOLVE_CORE(DrawPixels);
++    qglEdgeFlag = dllEdgeFlag = QGL_RESOLVE_CORE(EdgeFlag);
++    qglEdgeFlagPointer = dllEdgeFlagPointer = QGL_RESOLVE_CORE(EdgeFlagPointer);
++    qglEdgeFlagv = dllEdgeFlagv = QGL_RESOLVE_CORE(EdgeFlagv);
++    qglEnable = dllEnable = QGL_RESOLVE_CORE(Enable);
++    qglEnableClientState = dllEnableClientState = QGL_RESOLVE_CORE(EnableClientState);
++    qglEnd = dllEnd = QGL_RESOLVE_CORE(End);
++    qglEndList = dllEndList = QGL_RESOLVE_CORE(EndList);
++    qglEvalCoord1d = dllEvalCoord1d = QGL_RESOLVE_CORE(EvalCoord1d);
++    qglEvalCoord1dv = dllEvalCoord1dv = QGL_RESOLVE_CORE(EvalCoord1dv);
++    qglEvalCoord1f = dllEvalCoord1f = QGL_RESOLVE_CORE(EvalCoord1f);
++    qglEvalCoord1fv = dllEvalCoord1fv = QGL_RESOLVE_CORE(EvalCoord1fv);
++    qglEvalCoord2d = dllEvalCoord2d = QGL_RESOLVE_CORE(EvalCoord2d);
++    qglEvalCoord2dv = dllEvalCoord2dv = QGL_RESOLVE_CORE(EvalCoord2dv);
++    qglEvalCoord2f = dllEvalCoord2f = QGL_RESOLVE_CORE(EvalCoord2f);
++    qglEvalCoord2fv = dllEvalCoord2fv = QGL_RESOLVE_CORE(EvalCoord2fv);
++    qglEvalMesh1 = dllEvalMesh1 = QGL_RESOLVE_CORE(EvalMesh1);
++    qglEvalMesh2 = dllEvalMesh2 = QGL_RESOLVE_CORE(EvalMesh2);
++    qglEvalPoint1 = dllEvalPoint1 = QGL_RESOLVE_CORE(EvalPoint1);
++    qglEvalPoint2 = dllEvalPoint2 = QGL_RESOLVE_CORE(EvalPoint2);
++    qglFeedbackBuffer = dllFeedbackBuffer = QGL_RESOLVE_CORE(FeedbackBuffer);
++    qglFinish = dllFinish = QGL_RESOLVE_CORE(Finish);
++    qglFlush = dllFlush = QGL_RESOLVE_CORE(Flush);
++    qglFogf = dllFogf = QGL_RESOLVE_CORE(Fogf);
++    qglFogfv = dllFogfv = QGL_RESOLVE_CORE(Fogfv);
++    qglFogi = dllFogi = QGL_RESOLVE_CORE(Fogi);
++    qglFogiv = dllFogiv = QGL_RESOLVE_CORE(Fogiv);
++    qglFrontFace = dllFrontFace = QGL_RESOLVE_CORE(FrontFace);
++    qglFrustum = dllFrustum = QGL_RESOLVE_CORE(Frustum);
++    qglGenLists = dllGenLists = QGL_RESOLVE_CORE(GenLists);
++    qglGenTextures = dllGenTextures = QGL_RESOLVE_CORE(GenTextures);
++    qglGetBooleanv = dllGetBooleanv = QGL_RESOLVE_CORE(GetBooleanv);
++    qglGetClipPlane = dllGetClipPlane = QGL_RESOLVE_CORE(GetClipPlane);
++    qglGetDoublev = dllGetDoublev = QGL_RESOLVE_CORE(GetDoublev);
++    qglGetError = dllGetError = QGL_RESOLVE_CORE(GetError);
++    qglGetFloatv = dllGetFloatv = QGL_RESOLVE_CORE(GetFloatv);
++    qglGetIntegerv = dllGetIntegerv = QGL_RESOLVE_CORE(GetIntegerv);
++    qglGetLightfv = dllGetLightfv = QGL_RESOLVE_CORE(GetLightfv);
++    qglGetLightiv = dllGetLightiv = QGL_RESOLVE_CORE(GetLightiv);
++    qglGetMapdv = dllGetMapdv = QGL_RESOLVE_CORE(GetMapdv);
++    qglGetMapfv = dllGetMapfv = QGL_RESOLVE_CORE(GetMapfv);
++    qglGetMapiv = dllGetMapiv = QGL_RESOLVE_CORE(GetMapiv);
++    qglGetMaterialfv = dllGetMaterialfv = QGL_RESOLVE_CORE(GetMaterialfv);
++    qglGetMaterialiv = dllGetMaterialiv = QGL_RESOLVE_CORE(GetMaterialiv);
++    qglGetPixelMapfv = dllGetPixelMapfv = QGL_RESOLVE_CORE(GetPixelMapfv);
++    qglGetPixelMapuiv = dllGetPixelMapuiv = QGL_RESOLVE_CORE(GetPixelMapuiv);
++    qglGetPixelMapusv = dllGetPixelMapusv = QGL_RESOLVE_CORE(GetPixelMapusv);
++    qglGetPointerv = dllGetPointerv = QGL_RESOLVE_CORE(GetPointerv);
++    qglGetPolygonStipple = dllGetPolygonStipple = QGL_RESOLVE_CORE(GetPolygonStipple);
++    qglGetString = dllGetString = QGL_RESOLVE_CORE(GetString);
++    qglGetTexEnvfv = dllGetTexEnvfv = QGL_RESOLVE_CORE(GetTexEnvfv);
++    qglGetTexEnviv = dllGetTexEnviv = QGL_RESOLVE_CORE(GetTexEnviv);
++    qglGetTexGendv = dllGetTexGendv = QGL_RESOLVE_CORE(GetTexGendv);
++    qglGetTexGenfv = dllGetTexGenfv = QGL_RESOLVE_CORE(GetTexGenfv);
++    qglGetTexGeniv = dllGetTexGeniv = QGL_RESOLVE_CORE(GetTexGeniv);
++    qglGetTexImage = dllGetTexImage = QGL_RESOLVE_CORE(GetTexImage);
++    qglGetTexLevelParameterfv = dllGetTexLevelParameterfv = QGL_RESOLVE_CORE(GetTexLevelParameterfv);
++    qglGetTexLevelParameteriv = dllGetTexLevelParameteriv = QGL_RESOLVE_CORE(GetTexLevelParameteriv);
++    qglGetTexParameterfv = dllGetTexParameterfv = QGL_RESOLVE_CORE(GetTexParameterfv);
++    qglGetTexParameteriv = dllGetTexParameteriv = QGL_RESOLVE_CORE(GetTexParameteriv);
++    qglHint = dllHint = QGL_RESOLVE_CORE(Hint);
++    qglIndexMask = dllIndexMask = QGL_RESOLVE_CORE(IndexMask);
++    qglIndexPointer = dllIndexPointer = QGL_RESOLVE_CORE(IndexPointer);
++    qglIndexd = dllIndexd = QGL_RESOLVE_CORE(Indexd);
++    qglIndexdv = dllIndexdv = QGL_RESOLVE_CORE(Indexdv);
++    qglIndexf = dllIndexf = QGL_RESOLVE_CORE(Indexf);
++    qglIndexfv = dllIndexfv = QGL_RESOLVE_CORE(Indexfv);
++    qglIndexi = dllIndexi = QGL_RESOLVE_CORE(Indexi);
++    qglIndexiv = dllIndexiv = QGL_RESOLVE_CORE(Indexiv);
++    qglIndexs = dllIndexs = QGL_RESOLVE_CORE(Indexs);
++    qglIndexsv = dllIndexsv = QGL_RESOLVE_CORE(Indexsv);
++    qglIndexub = dllIndexub = QGL_RESOLVE_CORE(Indexub);
++    qglIndexubv = dllIndexubv = QGL_RESOLVE_CORE(Indexubv);
++    qglInitNames = dllInitNames = QGL_RESOLVE_CORE(InitNames);
++    qglInterleavedArrays = dllInterleavedArrays = QGL_RESOLVE_CORE(InterleavedArrays);
++    qglIsEnabled = dllIsEnabled = QGL_RESOLVE_CORE(IsEnabled);
++    qglIsList = dllIsList = QGL_RESOLVE_CORE(IsList);
++    qglIsTexture = dllIsTexture = QGL_RESOLVE_CORE(IsTexture);
++    qglLightModelf = dllLightModelf = QGL_RESOLVE_CORE(LightModelf);
++    qglLightModelfv = dllLightModelfv = QGL_RESOLVE_CORE(LightModelfv);
++    qglLightModeli = dllLightModeli = QGL_RESOLVE_CORE(LightModeli);
++    qglLightModeliv = dllLightModeliv = QGL_RESOLVE_CORE(LightModeliv);
++    qglLightf = dllLightf = QGL_RESOLVE_CORE(Lightf);
++    qglLightfv = dllLightfv = QGL_RESOLVE_CORE(Lightfv);
++    qglLighti = dllLighti = QGL_RESOLVE_CORE(Lighti);
++    qglLightiv = dllLightiv = QGL_RESOLVE_CORE(Lightiv);
++    qglLineStipple = dllLineStipple = QGL_RESOLVE_CORE(LineStipple);
++    qglLineWidth = dllLineWidth = QGL_RESOLVE_CORE(LineWidth);
++    qglListBase = dllListBase = QGL_RESOLVE_CORE(ListBase);
++    qglLoadIdentity = dllLoadIdentity = QGL_RESOLVE_CORE(LoadIdentity);
++    qglLoadMatrixd = dllLoadMatrixd = QGL_RESOLVE_CORE(LoadMatrixd);
++    qglLoadMatrixf = dllLoadMatrixf = QGL_RESOLVE_CORE(LoadMatrixf);
++    qglLoadName = dllLoadName = QGL_RESOLVE_CORE(LoadName);
++    qglLogicOp = dllLogicOp = QGL_RESOLVE_CORE(LogicOp);
++    qglMap1d = dllMap1d = QGL_RESOLVE_CORE(Map1d);
++    qglMap1f = dllMap1f = QGL_RESOLVE_CORE(Map1f);
++    qglMap2d = dllMap2d = QGL_RESOLVE_CORE(Map2d);
++    qglMap2f = dllMap2f = QGL_RESOLVE_CORE(Map2f);
++    qglMapGrid1d = dllMapGrid1d = QGL_RESOLVE_CORE(MapGrid1d);
++    qglMapGrid1f = dllMapGrid1f = QGL_RESOLVE_CORE(MapGrid1f);
++    qglMapGrid2d = dllMapGrid2d = QGL_RESOLVE_CORE(MapGrid2d);
++    qglMapGrid2f = dllMapGrid2f = QGL_RESOLVE_CORE(MapGrid2f);
++    qglMaterialf = dllMaterialf = QGL_RESOLVE_CORE(Materialf);
++    qglMaterialfv = dllMaterialfv = QGL_RESOLVE_CORE(Materialfv);
++    qglMateriali = dllMateriali = QGL_RESOLVE_CORE(Materiali);
++    qglMaterialiv = dllMaterialiv = QGL_RESOLVE_CORE(Materialiv);
++    qglMatrixMode = dllMatrixMode = QGL_RESOLVE_CORE(MatrixMode);
++    qglMultMatrixd = dllMultMatrixd = QGL_RESOLVE_CORE(MultMatrixd);
++    qglMultMatrixf = dllMultMatrixf = QGL_RESOLVE_CORE(MultMatrixf);
++    qglNewList = dllNewList = QGL_RESOLVE_CORE(NewList);
++    qglNormal3b = dllNormal3b = QGL_RESOLVE_CORE(Normal3b);
++    qglNormal3bv = dllNormal3bv = QGL_RESOLVE_CORE(Normal3bv);
++    qglNormal3d = dllNormal3d = QGL_RESOLVE_CORE(Normal3d);
++    qglNormal3dv = dllNormal3dv = QGL_RESOLVE_CORE(Normal3dv);
++    qglNormal3f = dllNormal3f = QGL_RESOLVE_CORE(Normal3f);
++    qglNormal3fv = dllNormal3fv = QGL_RESOLVE_CORE(Normal3fv);
++    qglNormal3i = dllNormal3i = QGL_RESOLVE_CORE(Normal3i);
++    qglNormal3iv = dllNormal3iv = QGL_RESOLVE_CORE(Normal3iv);
++    qglNormal3s = dllNormal3s = QGL_RESOLVE_CORE(Normal3s);
++    qglNormal3sv = dllNormal3sv = QGL_RESOLVE_CORE(Normal3sv);
++    qglNormalPointer = dllNormalPointer = QGL_RESOLVE_CORE(NormalPointer);
++    qglOrtho = dllOrtho = QGL_RESOLVE_CORE(Ortho);
++    qglPassThrough = dllPassThrough = QGL_RESOLVE_CORE(PassThrough);
++    qglPixelMapfv = dllPixelMapfv = QGL_RESOLVE_CORE(PixelMapfv);
++    qglPixelMapuiv = dllPixelMapuiv = QGL_RESOLVE_CORE(PixelMapuiv);
++    qglPixelMapusv = dllPixelMapusv = QGL_RESOLVE_CORE(PixelMapusv);
++    qglPixelStoref = dllPixelStoref = QGL_RESOLVE_CORE(PixelStoref);
++    qglPixelStorei = dllPixelStorei = QGL_RESOLVE_CORE(PixelStorei);
++    qglPixelTransferf = dllPixelTransferf = QGL_RESOLVE_CORE(PixelTransferf);
++    qglPixelTransferi = dllPixelTransferi = QGL_RESOLVE_CORE(PixelTransferi);
++    qglPixelZoom = dllPixelZoom = QGL_RESOLVE_CORE(PixelZoom);
++    qglPointSize = dllPointSize = QGL_RESOLVE_CORE(PointSize);
++    qglPolygonMode = dllPolygonMode = QGL_RESOLVE_CORE(PolygonMode);
++    qglPolygonOffset = dllPolygonOffset = QGL_RESOLVE_CORE(PolygonOffset);
++    qglPolygonStipple = dllPolygonStipple = QGL_RESOLVE_CORE(PolygonStipple);
++    qglPopAttrib = dllPopAttrib = QGL_RESOLVE_CORE(PopAttrib);
++    qglPopClientAttrib = dllPopClientAttrib = QGL_RESOLVE_CORE(PopClientAttrib);
++    qglPopMatrix = dllPopMatrix = QGL_RESOLVE_CORE(PopMatrix);
++    qglPopName = dllPopName = QGL_RESOLVE_CORE(PopName);
++    qglPrioritizeTextures = dllPrioritizeTextures = QGL_RESOLVE_CORE(PrioritizeTextures);
++    qglPushAttrib = dllPushAttrib = QGL_RESOLVE_CORE(PushAttrib);
++    qglPushClientAttrib = dllPushClientAttrib = QGL_RESOLVE_CORE(PushClientAttrib);
++    qglPushMatrix = dllPushMatrix = QGL_RESOLVE_CORE(PushMatrix);
++    qglPushName = dllPushName = QGL_RESOLVE_CORE(PushName);
++    qglRasterPos2d = dllRasterPos2d = QGL_RESOLVE_CORE(RasterPos2d);
++    qglRasterPos2dv = dllRasterPos2dv = QGL_RESOLVE_CORE(RasterPos2dv);
++    qglRasterPos2f = dllRasterPos2f = QGL_RESOLVE_CORE(RasterPos2f);
++    qglRasterPos2fv = dllRasterPos2fv = QGL_RESOLVE_CORE(RasterPos2fv);
++    qglRasterPos2i = dllRasterPos2i = QGL_RESOLVE_CORE(RasterPos2i);
++    qglRasterPos2iv = dllRasterPos2iv = QGL_RESOLVE_CORE(RasterPos2iv);
++    qglRasterPos2s = dllRasterPos2s = QGL_RESOLVE_CORE(RasterPos2s);
++    qglRasterPos2sv = dllRasterPos2sv = QGL_RESOLVE_CORE(RasterPos2sv);
++    qglRasterPos3d = dllRasterPos3d = QGL_RESOLVE_CORE(RasterPos3d);
++    qglRasterPos3dv = dllRasterPos3dv = QGL_RESOLVE_CORE(RasterPos3dv);
++    qglRasterPos3f = dllRasterPos3f = QGL_RESOLVE_CORE(RasterPos3f);
++    qglRasterPos3fv = dllRasterPos3fv = QGL_RESOLVE_CORE(RasterPos3fv);
++    qglRasterPos3i = dllRasterPos3i = QGL_RESOLVE_CORE(RasterPos3i);
++    qglRasterPos3iv = dllRasterPos3iv = QGL_RESOLVE_CORE(RasterPos3iv);
++    qglRasterPos3s = dllRasterPos3s = QGL_RESOLVE_CORE(RasterPos3s);
++    qglRasterPos3sv = dllRasterPos3sv = QGL_RESOLVE_CORE(RasterPos3sv);
++    qglRasterPos4d = dllRasterPos4d = QGL_RESOLVE_CORE(RasterPos4d);
++    qglRasterPos4dv = dllRasterPos4dv = QGL_RESOLVE_CORE(RasterPos4dv);
++    qglRasterPos4f = dllRasterPos4f = QGL_RESOLVE_CORE(RasterPos4f);
++    qglRasterPos4fv = dllRasterPos4fv = QGL_RESOLVE_CORE(RasterPos4fv);
++    qglRasterPos4i = dllRasterPos4i = QGL_RESOLVE_CORE(RasterPos4i);
++    qglRasterPos4iv = dllRasterPos4iv = QGL_RESOLVE_CORE(RasterPos4iv);
++    qglRasterPos4s = dllRasterPos4s = QGL_RESOLVE_CORE(RasterPos4s);
++    qglRasterPos4sv = dllRasterPos4sv = QGL_RESOLVE_CORE(RasterPos4sv);
++    qglReadBuffer = dllReadBuffer = QGL_RESOLVE_CORE(ReadBuffer);
++    qglReadPixels = dllReadPixels = QGL_RESOLVE_CORE(ReadPixels);
++    qglRectd = dllRectd = QGL_RESOLVE_CORE(Rectd);
++    qglRectdv = dllRectdv = QGL_RESOLVE_CORE(Rectdv);
++    qglRectf = dllRectf = QGL_RESOLVE_CORE(Rectf);
++    qglRectfv = dllRectfv = QGL_RESOLVE_CORE(Rectfv);
++    qglRecti = dllRecti = QGL_RESOLVE_CORE(Recti);
++    qglRectiv = dllRectiv = QGL_RESOLVE_CORE(Rectiv);
++    qglRects = dllRects = QGL_RESOLVE_CORE(Rects);
++    qglRectsv = dllRectsv = QGL_RESOLVE_CORE(Rectsv);
++    qglRenderMode = dllRenderMode = QGL_RESOLVE_CORE(RenderMode);
++    qglRotated = dllRotated = QGL_RESOLVE_CORE(Rotated);
++    qglRotatef = dllRotatef = QGL_RESOLVE_CORE(Rotatef);
++    qglScaled = dllScaled = QGL_RESOLVE_CORE(Scaled);
++    qglScalef = dllScalef = QGL_RESOLVE_CORE(Scalef);
++    qglScissor = dllScissor = QGL_RESOLVE_CORE(Scissor);
++    qglSelectBuffer = dllSelectBuffer = QGL_RESOLVE_CORE(SelectBuffer);
+     // DG: deprecated in opengl 3.2 and not needed because we don't do fixed function pipeline
+     // qglShadeModel                = 	dllShadeModel                = glShadeModel;
+     // DG end
+-    qglStencilFunc = dllStencilFunc = glStencilFunc;
+-    qglStencilMask = dllStencilMask = glStencilMask;
+-    qglStencilOp = dllStencilOp = glStencilOp;
+-    qglTexCoord1d = dllTexCoord1d = glTexCoord1d;
+-    qglTexCoord1dv = dllTexCoord1dv = glTexCoord1dv;
+-    qglTexCoord1f = dllTexCoord1f = glTexCoord1f;
+-    qglTexCoord1fv = dllTexCoord1fv = glTexCoord1fv;
+-    qglTexCoord1i = dllTexCoord1i = glTexCoord1i;
+-    qglTexCoord1iv = dllTexCoord1iv = glTexCoord1iv;
+-    qglTexCoord1s = dllTexCoord1s = glTexCoord1s;
+-    qglTexCoord1sv = dllTexCoord1sv = glTexCoord1sv;
+-    qglTexCoord2d = dllTexCoord2d = glTexCoord2d;
+-    qglTexCoord2dv = dllTexCoord2dv = glTexCoord2dv;
+-    qglTexCoord2f = dllTexCoord2f = glTexCoord2f;
+-    qglTexCoord2fv = dllTexCoord2fv = glTexCoord2fv;
+-    qglTexCoord2i = dllTexCoord2i = glTexCoord2i;
+-    qglTexCoord2iv = dllTexCoord2iv = glTexCoord2iv;
+-    qglTexCoord2s = dllTexCoord2s = glTexCoord2s;
+-    qglTexCoord2sv = dllTexCoord2sv = glTexCoord2sv;
+-    qglTexCoord3d = dllTexCoord3d = glTexCoord3d;
+-    qglTexCoord3dv = dllTexCoord3dv = glTexCoord3dv;
+-    qglTexCoord3f = dllTexCoord3f = glTexCoord3f;
+-    qglTexCoord3fv = dllTexCoord3fv = glTexCoord3fv;
+-    qglTexCoord3i = dllTexCoord3i = glTexCoord3i;
+-    qglTexCoord3iv = dllTexCoord3iv = glTexCoord3iv;
+-    qglTexCoord3s = dllTexCoord3s = glTexCoord3s;
+-    qglTexCoord3sv = dllTexCoord3sv = glTexCoord3sv;
+-    qglTexCoord4d = dllTexCoord4d = glTexCoord4d;
+-    qglTexCoord4dv = dllTexCoord4dv = glTexCoord4dv;
+-    qglTexCoord4f = dllTexCoord4f = glTexCoord4f;
+-    qglTexCoord4fv = dllTexCoord4fv = glTexCoord4fv;
+-    qglTexCoord4i = dllTexCoord4i = glTexCoord4i;
+-    qglTexCoord4iv = dllTexCoord4iv = glTexCoord4iv;
+-    qglTexCoord4s = dllTexCoord4s = glTexCoord4s;
+-    qglTexCoord4sv = dllTexCoord4sv = glTexCoord4sv;
+-    qglTexCoordPointer = dllTexCoordPointer = glTexCoordPointer;
+-    qglTexEnvf = dllTexEnvf = glTexEnvf;
+-    qglTexEnvfv = dllTexEnvfv = glTexEnvfv;
+-    qglTexEnvi = dllTexEnvi = glTexEnvi;
+-    qglTexEnviv = dllTexEnviv = glTexEnviv;
+-    qglTexGend = dllTexGend = glTexGend;
+-    qglTexGendv = dllTexGendv = glTexGendv;
+-    qglTexGenf = dllTexGenf = glTexGenf;
+-    qglTexGenfv = dllTexGenfv = glTexGenfv;
+-    qglTexGeni = dllTexGeni = glTexGeni;
+-    qglTexGeniv = dllTexGeniv = glTexGeniv;
+-    qglTexImage1D = dllTexImage1D = glTexImage1D;
+-    qglTexImage2D = dllTexImage2D = glTexImage2D;
+-    qglTexParameterf = dllTexParameterf = glTexParameterf;
+-    qglTexParameterfv = dllTexParameterfv = glTexParameterfv;
+-    qglTexParameteri = dllTexParameteri = glTexParameteri;
+-    qglTexParameteriv = dllTexParameteriv = glTexParameteriv;
+-    qglTexSubImage1D = dllTexSubImage1D = glTexSubImage1D;
+-    qglTexSubImage2D = dllTexSubImage2D = glTexSubImage2D;
+-    qglTranslated = dllTranslated = glTranslated;
+-    qglTranslatef = dllTranslatef = glTranslatef;
+-    qglVertex2d = dllVertex2d = glVertex2d;
+-    qglVertex2dv = dllVertex2dv = glVertex2dv;
+-    qglVertex2f = dllVertex2f = glVertex2f;
+-    qglVertex2fv = dllVertex2fv = glVertex2fv;
+-    qglVertex2i = dllVertex2i = glVertex2i;
+-    qglVertex2iv = dllVertex2iv = glVertex2iv;
+-    qglVertex2s = dllVertex2s = glVertex2s;
+-    qglVertex2sv = dllVertex2sv = glVertex2sv;
+-    qglVertex3d = dllVertex3d = glVertex3d;
+-    qglVertex3dv = dllVertex3dv = glVertex3dv;
+-    qglVertex3f = dllVertex3f = glVertex3f;
+-    qglVertex3fv = dllVertex3fv = glVertex3fv;
+-    qglVertex3i = dllVertex3i = glVertex3i;
+-    qglVertex3iv = dllVertex3iv = glVertex3iv;
+-    qglVertex3s = dllVertex3s = glVertex3s;
+-    qglVertex3sv = dllVertex3sv = glVertex3sv;
+-    qglVertex4d = dllVertex4d = glVertex4d;
+-    qglVertex4dv = dllVertex4dv = glVertex4dv;
+-    qglVertex4f = dllVertex4f = glVertex4f;
+-    qglVertex4fv = dllVertex4fv = glVertex4fv;
+-    qglVertex4i = dllVertex4i = glVertex4i;
+-    qglVertex4iv = dllVertex4iv = glVertex4iv;
+-    qglVertex4s = dllVertex4s = glVertex4s;
+-    qglVertex4sv = dllVertex4sv = glVertex4sv;
+-    qglVertexPointer = dllVertexPointer = glVertexPointer;
+-    qglViewport = dllViewport = glViewport;
++    qglStencilFunc = dllStencilFunc = QGL_RESOLVE_CORE(StencilFunc);
++    qglStencilMask = dllStencilMask = QGL_RESOLVE_CORE(StencilMask);
++    qglStencilOp = dllStencilOp = QGL_RESOLVE_CORE(StencilOp);
++    qglTexCoord1d = dllTexCoord1d = QGL_RESOLVE_CORE(TexCoord1d);
++    qglTexCoord1dv = dllTexCoord1dv = QGL_RESOLVE_CORE(TexCoord1dv);
++    qglTexCoord1f = dllTexCoord1f = QGL_RESOLVE_CORE(TexCoord1f);
++    qglTexCoord1fv = dllTexCoord1fv = QGL_RESOLVE_CORE(TexCoord1fv);
++    qglTexCoord1i = dllTexCoord1i = QGL_RESOLVE_CORE(TexCoord1i);
++    qglTexCoord1iv = dllTexCoord1iv = QGL_RESOLVE_CORE(TexCoord1iv);
++    qglTexCoord1s = dllTexCoord1s = QGL_RESOLVE_CORE(TexCoord1s);
++    qglTexCoord1sv = dllTexCoord1sv = QGL_RESOLVE_CORE(TexCoord1sv);
++    qglTexCoord2d = dllTexCoord2d = QGL_RESOLVE_CORE(TexCoord2d);
++    qglTexCoord2dv = dllTexCoord2dv = QGL_RESOLVE_CORE(TexCoord2dv);
++    qglTexCoord2f = dllTexCoord2f = QGL_RESOLVE_CORE(TexCoord2f);
++    qglTexCoord2fv = dllTexCoord2fv = QGL_RESOLVE_CORE(TexCoord2fv);
++    qglTexCoord2i = dllTexCoord2i = QGL_RESOLVE_CORE(TexCoord2i);
++    qglTexCoord2iv = dllTexCoord2iv = QGL_RESOLVE_CORE(TexCoord2iv);
++    qglTexCoord2s = dllTexCoord2s = QGL_RESOLVE_CORE(TexCoord2s);
++    qglTexCoord2sv = dllTexCoord2sv = QGL_RESOLVE_CORE(TexCoord2sv);
++    qglTexCoord3d = dllTexCoord3d = QGL_RESOLVE_CORE(TexCoord3d);
++    qglTexCoord3dv = dllTexCoord3dv = QGL_RESOLVE_CORE(TexCoord3dv);
++    qglTexCoord3f = dllTexCoord3f = QGL_RESOLVE_CORE(TexCoord3f);
++    qglTexCoord3fv = dllTexCoord3fv = QGL_RESOLVE_CORE(TexCoord3fv);
++    qglTexCoord3i = dllTexCoord3i = QGL_RESOLVE_CORE(TexCoord3i);
++    qglTexCoord3iv = dllTexCoord3iv = QGL_RESOLVE_CORE(TexCoord3iv);
++    qglTexCoord3s = dllTexCoord3s = QGL_RESOLVE_CORE(TexCoord3s);
++    qglTexCoord3sv = dllTexCoord3sv = QGL_RESOLVE_CORE(TexCoord3sv);
++    qglTexCoord4d = dllTexCoord4d = QGL_RESOLVE_CORE(TexCoord4d);
++    qglTexCoord4dv = dllTexCoord4dv = QGL_RESOLVE_CORE(TexCoord4dv);
++    qglTexCoord4f = dllTexCoord4f = QGL_RESOLVE_CORE(TexCoord4f);
++    qglTexCoord4fv = dllTexCoord4fv = QGL_RESOLVE_CORE(TexCoord4fv);
++    qglTexCoord4i = dllTexCoord4i = QGL_RESOLVE_CORE(TexCoord4i);
++    qglTexCoord4iv = dllTexCoord4iv = QGL_RESOLVE_CORE(TexCoord4iv);
++    qglTexCoord4s = dllTexCoord4s = QGL_RESOLVE_CORE(TexCoord4s);
++    qglTexCoord4sv = dllTexCoord4sv = QGL_RESOLVE_CORE(TexCoord4sv);
++    qglTexCoordPointer = dllTexCoordPointer = QGL_RESOLVE_CORE(TexCoordPointer);
++    qglTexEnvf = dllTexEnvf = QGL_RESOLVE_CORE(TexEnvf);
++    qglTexEnvfv = dllTexEnvfv = QGL_RESOLVE_CORE(TexEnvfv);
++    qglTexEnvi = dllTexEnvi = QGL_RESOLVE_CORE(TexEnvi);
++    qglTexEnviv = dllTexEnviv = QGL_RESOLVE_CORE(TexEnviv);
++    qglTexGend = dllTexGend = QGL_RESOLVE_CORE(TexGend);
++    qglTexGendv = dllTexGendv = QGL_RESOLVE_CORE(TexGendv);
++    qglTexGenf = dllTexGenf = QGL_RESOLVE_CORE(TexGenf);
++    qglTexGenfv = dllTexGenfv = QGL_RESOLVE_CORE(TexGenfv);
++    qglTexGeni = dllTexGeni = QGL_RESOLVE_CORE(TexGeni);
++    qglTexGeniv = dllTexGeniv = QGL_RESOLVE_CORE(TexGeniv);
++    qglTexImage1D = dllTexImage1D = QGL_RESOLVE_CORE(TexImage1D);
++    qglTexImage2D = dllTexImage2D = QGL_RESOLVE_CORE(TexImage2D);
++    qglTexParameterf = dllTexParameterf = QGL_RESOLVE_CORE(TexParameterf);
++    qglTexParameterfv = dllTexParameterfv = QGL_RESOLVE_CORE(TexParameterfv);
++    qglTexParameteri = dllTexParameteri = QGL_RESOLVE_CORE(TexParameteri);
++    qglTexParameteriv = dllTexParameteriv = QGL_RESOLVE_CORE(TexParameteriv);
++    qglTexSubImage1D = dllTexSubImage1D = QGL_RESOLVE_CORE(TexSubImage1D);
++    qglTexSubImage2D = dllTexSubImage2D = QGL_RESOLVE_CORE(TexSubImage2D);
++    qglTranslated = dllTranslated = QGL_RESOLVE_CORE(Translated);
++    qglTranslatef = dllTranslatef = QGL_RESOLVE_CORE(Translatef);
++    qglVertex2d = dllVertex2d = QGL_RESOLVE_CORE(Vertex2d);
++    qglVertex2dv = dllVertex2dv = QGL_RESOLVE_CORE(Vertex2dv);
++    qglVertex2f = dllVertex2f = QGL_RESOLVE_CORE(Vertex2f);
++    qglVertex2fv = dllVertex2fv = QGL_RESOLVE_CORE(Vertex2fv);
++    qglVertex2i = dllVertex2i = QGL_RESOLVE_CORE(Vertex2i);
++    qglVertex2iv = dllVertex2iv = QGL_RESOLVE_CORE(Vertex2iv);
++    qglVertex2s = dllVertex2s = QGL_RESOLVE_CORE(Vertex2s);
++    qglVertex2sv = dllVertex2sv = QGL_RESOLVE_CORE(Vertex2sv);
++    qglVertex3d = dllVertex3d = QGL_RESOLVE_CORE(Vertex3d);
++    qglVertex3dv = dllVertex3dv = QGL_RESOLVE_CORE(Vertex3dv);
++    qglVertex3f = dllVertex3f = QGL_RESOLVE_CORE(Vertex3f);
++    qglVertex3fv = dllVertex3fv = QGL_RESOLVE_CORE(Vertex3fv);
++    qglVertex3i = dllVertex3i = QGL_RESOLVE_CORE(Vertex3i);
++    qglVertex3iv = dllVertex3iv = QGL_RESOLVE_CORE(Vertex3iv);
++    qglVertex3s = dllVertex3s = QGL_RESOLVE_CORE(Vertex3s);
++    qglVertex3sv = dllVertex3sv = QGL_RESOLVE_CORE(Vertex3sv);
++    qglVertex4d = dllVertex4d = QGL_RESOLVE_CORE(Vertex4d);
++    qglVertex4dv = dllVertex4dv = QGL_RESOLVE_CORE(Vertex4dv);
++    qglVertex4f = dllVertex4f = QGL_RESOLVE_CORE(Vertex4f);
++    qglVertex4fv = dllVertex4fv = QGL_RESOLVE_CORE(Vertex4fv);
++    qglVertex4i = dllVertex4i = QGL_RESOLVE_CORE(Vertex4i);
++    qglVertex4iv = dllVertex4iv = QGL_RESOLVE_CORE(Vertex4iv);
++    qglVertex4s = dllVertex4s = QGL_RESOLVE_CORE(Vertex4s);
++    qglVertex4sv = dllVertex4sv = QGL_RESOLVE_CORE(Vertex4sv);
++    qglVertexPointer = dllVertexPointer = QGL_RESOLVE_CORE(VertexPointer);
++    qglViewport = dllViewport = QGL_RESOLVE_CORE(Viewport);
+ 
+     /*
+     qwglCopyContext              = wglCopyContext;
+diff --git a/neo/ui/DeviceContext.cpp b/neo/ui/DeviceContext.cpp
+index 71d7b6a..e18a277 100644
+--- a/neo/ui/DeviceContext.cpp
++++ b/neo/ui/DeviceContext.cpp
+@@ -49,13 +49,17 @@ idVec4 idDeviceContext::colorNone;
+ 
+ void idDeviceContext::Init()
+ {
++    common->Printf("[web-port trace] device context init begin\n");
+     xScale = 1.0f;
+     yScale = 1.0f;
+     xOffset = 0.0f;
+     yOffset = 0.0f;
+     whiteImage = declManager->FindMaterial("guis/assets/white.tga");
++    common->Printf("[web-port trace] device context white image ready\n");
+     whiteImage->SetSort(SS_GUI);
++    common->Printf("[web-port trace] device context default font begin\n");
+     activeFont = renderSystem->RegisterFont("");
++    common->Printf("[web-port trace] device context default font ready\n");
+     colorPurple = idVec4(1, 0, 1, 1);
+     colorOrange = idVec4(1, 1, 0, 1);
+     colorYellow = idVec4(0, 1, 1, 1);
+@@ -75,6 +79,7 @@ void idDeviceContext::Init()
+     cursorImages[CURSOR_HAND_JOY2] = declManager->FindMaterial("ui/assets/guicursor_hand_b.tga");
+     cursorImages[CURSOR_HAND_JOY3] = declManager->FindMaterial("ui/assets/guicursor_hand_x.tga");
+     cursorImages[CURSOR_HAND_JOY4] = declManager->FindMaterial("ui/assets/guicursor_hand_y.tga");
++    common->Printf("[web-port trace] device context cursor images ready\n");
+     scrollBarImages[SCROLLBAR_HBACK] = declManager->FindMaterial("ui/assets/scrollbarh.tga");
+     scrollBarImages[SCROLLBAR_VBACK] = declManager->FindMaterial("ui/assets/scrollbarv.tga");
+     scrollBarImages[SCROLLBAR_THUMB] = declManager->FindMaterial("ui/assets/scrollbar_thumb.tga");
+@@ -82,6 +87,7 @@ void idDeviceContext::Init()
+     scrollBarImages[SCROLLBAR_LEFT] = declManager->FindMaterial("ui/assets/scrollbar_left.tga");
+     scrollBarImages[SCROLLBAR_UP] = declManager->FindMaterial("ui/assets/scrollbar_up.tga");
+     scrollBarImages[SCROLLBAR_DOWN] = declManager->FindMaterial("ui/assets/scrollbar_down.tga");
++    common->Printf("[web-port trace] device context scrollbar images ready\n");
+     cursorImages[CURSOR_ARROW]->SetSort(SS_GUI);
+     cursorImages[CURSOR_HAND]->SetSort(SS_GUI);
+     scrollBarImages[SCROLLBAR_HBACK]->SetSort(SS_GUI);
+@@ -98,6 +104,7 @@ void idDeviceContext::Init()
+     matIsIdentity = true;
+     origin.Zero();
+     initialized = true;
++    common->Printf("[web-port trace] device context init complete\n");
+ }
+ 
+ void idDeviceContext::Shutdown()
+diff --git a/neo/ui/UserInterface.cpp b/neo/ui/UserInterface.cpp
+index 0bd5d9c..83e16da 100644
+--- a/neo/ui/UserInterface.cpp
++++ b/neo/ui/UserInterface.cpp
+@@ -57,11 +57,15 @@ extern idCVar sys_lang;
+ 
+ void idUserInterfaceManagerLocal::Init()
+ {
++    common->Printf("[web-port trace] UI manager init begin\n");
+     screenRect = idRectangle(0, 0, 640, 480);
+     dcOld.Init();
++    common->Printf("[web-port trace] UI old device context complete\n");
+     dcOptimized.Init();
++    common->Printf("[web-port trace] UI optimized device context complete\n");
+ 
+     SetDrawingDC();
++    common->Printf("[web-port trace] UI drawing context selected\n");
+ }
+ 
+ void idUserInterfaceManagerLocal::Shutdown()

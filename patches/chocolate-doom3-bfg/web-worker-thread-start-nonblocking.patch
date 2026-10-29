@@ -1,0 +1,13 @@
+diff --git a/neo/idlib/Thread.cpp b/neo/idlib/Thread.cpp
+--- a/neo/idlib/Thread.cpp
++++ b/neo/idlib/Thread.cpp
+@@ -109,7 +109,9 @@ bool idSysThread::StartWorkerThread(const char* name_, core_t core, xthreadPriority priority, int stackSize)
+     isWorker = true;
+ 
+     bool result = StartThread(name_, core, priority, stackSize);
+
++#if !defined(__EMSCRIPTEN_PTHREADS__)
+     signalWorkerDone.Wait(idSysSignal::WAIT_INFINITE);
++#endif
+ 
+     return result;

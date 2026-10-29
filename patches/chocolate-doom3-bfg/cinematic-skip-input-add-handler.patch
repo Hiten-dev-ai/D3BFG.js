@@ -1,0 +1,33 @@
+diff --git a/neo/framework/Common.cpp b/neo/framework/Common.cpp
+--- a/neo/framework/Common.cpp
++++ b/neo/framework/Common.cpp
+@@ -1632,4 +1632,28 @@ bool idCommonLocal::ProcessEvent(const sysEvent_t* event)
+ bool idCommonLocal::ProcessEvent(const sysEvent_t* event)
+ {
+-    // hitting escape anywhere brings up the menu
++    // Consume both halves of a cinematic skip key so its release cannot
++    // become a gameplay action after the scene ends.
++    if (event->evType == SE_KEY &&
++        (event->evValue == K_ESCAPE || event->evValue == K_JOY9 || event->evValue == K_ENTER ||
++            event->evValue == K_KP_ENTER || event->evValue == K_SPACE)) {
++        static idList<int> consumedCinematicSkipKeys;
++        const bool keyDown = event->evValue2 != 0;
++        const int consumedIndex = consumedCinematicSkipKeys.FindIndex(event->evValue);
++
++        if (consumedIndex >= 0) {
++            if (!keyDown) {
++                consumedCinematicSkipKeys.RemoveIndex(consumedIndex);
++            }
++            return true;
++        }
++
++        if (game && game->CheckInCinematic()) {
++            if (keyDown) {
++                consumedCinematicSkipKeys.AddUnique(event->evValue);
++                game->SkipCinematicScene();
++            }
++            return true;
++        }
++    }
++
+     if (game && game->IsInGame()) {

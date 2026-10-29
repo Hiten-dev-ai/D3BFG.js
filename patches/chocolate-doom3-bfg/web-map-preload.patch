@@ -1,0 +1,270 @@
+diff --git a/neo/renderer/ImageManager.cpp b/neo/renderer/ImageManager.cpp
+index d1039fb..e095bd2 100644
+--- a/neo/renderer/ImageManager.cpp
++++ b/neo/renderer/ImageManager.cpp
+@@ -768,12 +768,37 @@ void idImageManager::Preload(const idPreloadManifest& manifest, const bool& mapP
+         preloadingMapImages = mapPreload;
+         int start = Sys_Milliseconds();
+         int numLoaded = 0;
++#ifdef __EMSCRIPTEN__
++        int preloadImageCount = 0;
++        for (int i = 0; i < manifest.NumResources(); i++) {
++            const preloadEntry_s& p = manifest.GetPreloadByIndex(i);
++            if (p.resType == PRELOAD_IMAGE && !ExcludePreloadImage(p.resourceName)) {
++                preloadImageCount++;
++            }
++        }
++        int preloadImageIndex = 0;
++        common->Printf("[web-port map] image preload started count=%d\n", preloadImageCount);
++#endif
+ 
+         // fileSystem->StartPreload( preloadImageFiles );
+         for (int i = 0; i < manifest.NumResources(); i++) {
+             const preloadEntry_s& p = manifest.GetPreloadByIndex(i);
+             if (p.resType == PRELOAD_IMAGE && !ExcludePreloadImage(p.resourceName)) {
++#ifdef __EMSCRIPTEN__
++                if (preloadImageIndex % 8 == 0) {
++                    common->UpdateLevelLoadPacifier();
++                }
++                const int imageStart = Sys_Milliseconds();
++                common->Printf("[web-port map] image preload item started index=%d/%d name=%s\n", preloadImageIndex + 1, preloadImageCount, p.resourceName.c_str());
++#endif
+                 globalImages->ImageFromFile(p.resourceName, (textureFilter_t)p.imgData.filter, (textureRepeat_t)p.imgData.repeat, (textureUsage_t)p.imgData.usage, (cubeFiles_t)p.imgData.cubeMap);
++#ifdef __EMSCRIPTEN__
++                const int imageElapsed = Sys_Milliseconds() - imageStart;
++                preloadImageIndex++;
++                if (imageElapsed >= 100 || preloadImageIndex % 16 == 0 || preloadImageIndex == preloadImageCount) {
++                    common->Printf("[web-port map] image preload progress=%d/%d last=%s elapsed=%d ms\n", preloadImageIndex, preloadImageCount, p.resourceName.c_str(), imageElapsed);
++                }
++#endif
+                 numLoaded++;
+             }
+         }
+diff --git a/neo/renderer/RenderSystem_init.cpp b/neo/renderer/RenderSystem_init.cpp
+--- a/neo/renderer/RenderSystem_init.cpp
++++ b/neo/renderer/RenderSystem_init.cpp
+@@ -2521,6 +2521,20 @@
+ void idRenderSystemLocal::Preload(const idPreloadManifest& manifest, const char* mapName)
+ {
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port map] renderer image preload started\n");
++#endif
+     globalImages->Preload(manifest, true);
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port map] renderer image preload returned\n");
++    common->Printf("[web-port map] renderer UI preload started\n");
++#endif
+     uiManager->Preload(mapName);
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port map] renderer UI preload returned\n");
++    common->Printf("[web-port map] renderer model preload started\n");
++#endif
+     renderModelManager->Preload(manifest);
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port map] renderer model preload returned\n");
++#endif
+ }
+
+diff --git a/neo/renderer/ModelManager.cpp b/neo/renderer/ModelManager.cpp
+index e25a4da..e3f6793 100644
+--- a/neo/renderer/ModelManager.cpp
++++ b/neo/renderer/ModelManager.cpp
+@@ -576,13 +576,26 @@ idRenderModelManagerLocal::Preload
+ */
+ void idRenderModelManagerLocal::Preload(const idPreloadManifest& manifest)
+ {
++#if defined(__EMSCRIPTEN__)
++    const int webPreloadStart = Sys_Milliseconds();
++    common->Printf("[web-port map] model preload entered enabled=%d entries=%d\n", preload_MapModels.GetBool() ? 1 : 0, manifest.NumResources());
++#endif
+     if (preload_MapModels.GetBool()) {
+         // preload this levels images
+         int start = Sys_Milliseconds();
+         int numLoaded = 0;
+         idList<preloadSort_t> preloadSort;
+         preloadSort.Resize(manifest.NumResources());
++#if defined(__EMSCRIPTEN__)
++        const int webScanStart = Sys_Milliseconds();
++        common->Printf("[web-port map] model preload cache scan started entries=%d\n", manifest.NumResources());
++#endif
+         for (int i = 0; i < manifest.NumResources(); i++) {
++#if defined(__EMSCRIPTEN__)
++            if (i % 64 == 0) {
++                common->Printf("[web-port map] model preload cache scan progress=%d/%d\n", i, manifest.NumResources());
++            }
++#endif
+             const preloadEntry_s& p = manifest.GetPreloadByIndex(i);
+             idResourceCacheEntry rc;
+             idStrStatic<MAX_OSPATH> filename;
+@@ -599,20 +612,48 @@ void idRenderModelManagerLocal::Preload(const idPreloadManifest& manifest)
+                 filename += ".bprt";
+             }
+             if (!filename.IsEmpty()) {
++#if defined(__EMSCRIPTEN__)
++                common->Printf("[web-port map] model cache lookup started manifestIndex=%d type=%s name=%s\n", i, p.resType == PRELOAD_MODEL ? "model" : "particle", p.resourceName.c_str());
++#endif
+                 if (fileSystem->GetResourceCacheEntry(filename, rc)) {
+                     preloadSort_t ps = {};
+                     ps.idx = i;
+                     ps.ofs = rc.offset;
+                     preloadSort.Append(ps);
++#if defined(__EMSCRIPTEN__)
++                    common->Printf("[web-port map] model cache lookup returned manifestIndex=%d found=1 offset=%d\n", i, rc.offset);
++#endif
++#if defined(__EMSCRIPTEN__)
++                } else {
++                    common->Printf("[web-port map] model cache lookup returned manifestIndex=%d found=0\n", i);
++#endif
+                 }
+             }
+         }
+ 
++#if defined(__EMSCRIPTEN__)
++        common->Printf("[web-port map] model preload cache scan returned candidates=%d elapsed=%d ms\n", preloadSort.Num(), Sys_Milliseconds() - webScanStart);
++        const int webSortStart = Sys_Milliseconds();
++        common->Printf("[web-port map] model preload sort started candidates=%d\n", preloadSort.Num());
++#endif
+         preloadSort.SortWithTemplate(idSort_Preload());
++#if defined(__EMSCRIPTEN__)
++        common->Printf("[web-port map] model preload sort returned elapsed=%d ms\n", Sys_Milliseconds() - webSortStart);
++#endif
+ 
+         for (int i = 0; i < preloadSort.Num(); i++) {
++#if defined(__EMSCRIPTEN__)
++            if (i % 8 == 0) {
++                common->UpdateLevelLoadPacifier();
++            }
++            const int webItemStart = Sys_Milliseconds();
++#endif
+             const preloadSort_t& ps = preloadSort[i];
+             const preloadEntry_s& p = manifest.GetPreloadByIndex(ps.idx);
++#if defined(__EMSCRIPTEN__)
++            const char* webResourceType = p.resType == PRELOAD_MODEL ? "model" : "particle";
++            common->Printf("[web-port map] model preload item started index=%d/%d type=%s name=%s\n", i + 1, preloadSort.Num(), webResourceType, p.resourceName.c_str());
++#endif
+             if (p.resType == PRELOAD_MODEL) {
+                 idRenderModel* model = FindModel(p.resourceName);
+                 if (model != NULL) {
+@@ -622,12 +663,21 @@ void idRenderModelManagerLocal::Preload(const idPreloadManifest& manifest)
+                 declManager->FindType(DECL_PARTICLE, p.resourceName);
+             }
+             numLoaded++;
++#if defined(__EMSCRIPTEN__)
++            const int webItemElapsed = Sys_Milliseconds() - webItemStart;
++            if (webItemElapsed >= 100 || (i + 1) % 8 == 0 || i + 1 == preloadSort.Num()) {
++                common->Printf("[web-port map] model preload item returned index=%d/%d type=%s name=%s elapsed=%d ms\n", i + 1, preloadSort.Num(), webResourceType, p.resourceName.c_str(), webItemElapsed);
++            }
++#endif
+         }
+ 
+         int end = Sys_Milliseconds();
+         common->Printf("%05d models preloaded ( or were already loaded ) in %5.1f seconds\n", numLoaded, (end - start) * 0.001);
+         common->Printf("----------------------------------------\n");
+     }
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port map] model preload returned elapsed=%d ms\n", Sys_Milliseconds() - webPreloadStart);
++#endif
+ }
+ 
+ /*
+diff --git a/neo/renderer/Image_load.cpp b/neo/renderer/Image_load.cpp
+index 9384a97..13050e7 100644
+--- a/neo/renderer/Image_load.cpp
++++ b/neo/renderer/Image_load.cpp
+@@ -287,6 +287,12 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     if (!R_IsInitialized()) {
+         return;
+     }
++#if defined(__EMSCRIPTEN__)
++    const bool webTraceEyeLeft = idStr::Icmp(GetName(), "guis/assets/mainmenu/eye_left") == 0;
++    if (webTraceEyeLeft) {
++        common->Printf("[web-port trace] eye_left ActuallyLoadImage started\n");
++    }
++#endif
+ 
+     // this is the ONLY place generatorFunction will ever be called
+     if (generatorFunction) {
+@@ -307,7 +313,13 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             R_LoadCubeImages(GetName(), cubeFiles, NULL, NULL, &sourceFileTime);
+         } else {
+             opts.textureType = TT_2D;
++#if defined(__EMSCRIPTEN__)
++            if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read started\n");
++#endif
+             R_LoadImageProgram(GetName(), NULL, NULL, NULL, &sourceFileTime, &usage);
++#if defined(__EMSCRIPTEN__)
++            if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read returned\n");
++#endif
+         }
+     }
+ 
+@@ -318,7 +330,13 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     GetGeneratedName(generatedName, usage, cubeFiles);
+ 
+     idBinaryImage im(generatedName);
++#if defined(__EMSCRIPTEN__)
++    if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read started\n");
++#endif
+     binaryFileTime = im.LoadFromGeneratedFile(sourceFileTime);
++#if defined(__EMSCRIPTEN__)
++    if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
++#endif
+ 
+     // BFHACK, do not want to tweak on buildgame so catch these images here
+     if (binaryFileTime == FILE_NOT_FOUND_TIMESTAMP && fileSystem->UsingResourceFiles()) {
+@@ -398,7 +416,13 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             byte* pic;
+ 
+             // load the full specification, and perform any image program calculations
++#if defined(__EMSCRIPTEN__)
++            if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read started\n");
++#endif
+             R_LoadImageProgram(GetName(), &pic, &width, &height, &sourceFileTime, &usage);
++#if defined(__EMSCRIPTEN__)
++            if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
++#endif
+ 
+             if (pic == NULL) {
+                 idLib::Warning("Couldn't load image: %s : %s", GetName(), generatedName.c_str());
+@@ -423,11 +447,23 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             opts.height = height;
+             opts.numLevels = 0;
+             DeriveOpts();
++#if defined(__EMSCRIPTEN__)
++            if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left binary image build started width=%d height=%d\n", width, height);
++#endif
+             im.Load2DFromMemory(opts.width, opts.height, pic, opts.numLevels, opts.format, opts.colorFormat, opts.gammaMips);
++#if defined(__EMSCRIPTEN__)
++            if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left binary image build returned\n");
++#endif
+ 
+             Mem_Free(pic);
+         }
++#if defined(__EMSCRIPTEN__)
++        if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache write started\n");
++#endif
+         binaryFileTime = im.WriteGeneratedFile(sourceFileTime);
++#if defined(__EMSCRIPTEN__)
++        if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache write returned\n");
++#endif
+     }
+ 
+     AllocImage();
+@@ -435,8 +471,17 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     for (int i = 0; i < im.NumImages(); i++) {
+         const bimageImage_t& img = im.GetImageHeader(i);
+         const byte* data = im.GetImageData(i);
++#if defined(__EMSCRIPTEN__)
++        if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left GPU upload started level=%d size=%dx%d\n", img.level, img.width, img.height);
++#endif
+         SubImageUpload(img.level, 0, 0, img.destZ, img.width, img.height, data);
++#if defined(__EMSCRIPTEN__)
++        if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left GPU upload returned level=%d\n", img.level);
++#endif
+     }
++#if defined(__EMSCRIPTEN__)
++    if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left ActuallyLoadImage returned\n");
++#endif
+ }
+ 
+ /*

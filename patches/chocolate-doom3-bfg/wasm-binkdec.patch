@@ -1,0 +1,169 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6e8afa6..0964442 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -7,8 +7,19 @@ option(USE_MFC_TOOLS "Compile the built-in MFC based tools" OFF)
+ option(MONOLITH "Embed game logic into main executable" ON)
+ option(OPENAL "Use OpenAL soft instead of XAudio2" OFF)
+ option(FFMPEG "Use FMPEG to render Bink videos" OFF)
++option(BINKDEC "Use included libbinkdec to render Bink videos" ON)
+ 
+ option(USE_OPENGL_ES "Use OpenGL ES instead of Desktop GL" OFF)
++set(
++    DOOM3BFG_WEB_OUTPUT_DIR
++    "${CMAKE_CURRENT_SOURCE_DIR}/../../web/public/engine"
++    CACHE PATH "Output directory for the Emscripten engine module"
++)
++option(
++    DOOM3BFG_WEB_WORKER_PROFILE
++    "Build the experimental pthread/OffscreenCanvas browser profile"
++    OFF
++)
+ 
+ if(UNIX)
+     set(OPENAL TRUE)
+@@ -38,6 +49,11 @@ if(USE_OPENGL_ES)
+     add_definitions(-DUSE_GLES2=1)
+ endif()
+ 
++if(EMSCRIPTEN AND DOOM3BFG_WEB_WORKER_PROFILE)
++    # Every linked object, including idlib, must use wasm atomics/bulk memory.
++    add_compile_options("-pthread")
++endif()
++
+ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+     add_definitions(-pipe)
+     #add_definitions(-Wall)
+@@ -1011,6 +1027,15 @@ include_directories(
+     neo/libs/zlib
+ )
+ 
++if(BINKDEC)
++    file(GLOB BINKDEC_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libbinkdec/include/*.h)
++    file(GLOB BINKDEC_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libbinkdec/src/*.c ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libbinkdec/src/*.cpp)
++    add_definitions(-DUSE_BINKDEC)
++    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libbinkdec/include)
++    list(APPEND DOOM_INCLUDES ${BINKDEC_INCLUDES})
++    list(APPEND DOOM_SOURCES ${BINKDEC_SOURCES})
++endif()
++
+ if(MSVC)
+     # if(MSVC_VERSION EQUAL 1700)
+     # set(DirectX_LIBRARIES
+@@ -1154,6 +1179,7 @@ if(MSVC)
+         ${TIMIDITY_SOURCES}
+         ${JPEG_SOURCES}
+         ${ZLIB_SOURCES}
++        ${BINKDEC_SOURCES}
+     )
+     list(
+         REMOVE_ITEM
+@@ -1362,6 +1388,7 @@ else()
+         ${TIMIDITY_SOURCES}
+         ${JPEG_SOURCES}
+         ${ZLIB_SOURCES}
++        ${BINKDEC_SOURCES}
+     )
+     list(
+         REMOVE_ITEM
+@@ -1414,27 +1441,28 @@ else()
+         set_source_files_properties(
+             ${src_file}
+             PROPERTIES
+-                COMPILE_FLAGS
+-                    "-include ${CMAKE_CURRENT_SOURCE_DIR}/neo/idlib/precompiled.h"
++                COMPILE_OPTIONS
++                    "-include;${CMAKE_CURRENT_SOURCE_DIR}/neo/idlib/precompiled.h"
+         )
+     endforeach()
+ 
+     # precompiled magic for GCC/clang, adapted from https://gist.github.com/573926
+     string(TOUPPER "CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}" _flags_var_name)
+     set(_compiler_FLAGS ${${_flags_var_name}})
++    separate_arguments(_compiler_FLAGS)
++
+     get_directory_property(_directory_flags INCLUDE_DIRECTORIES)
+     foreach(item ${_directory_flags})
+-        list(APPEND _compiler_FLAGS " -I${item}")
++        list(APPEND _compiler_FLAGS -I "${item}")
+     endforeach(item)
+ 
+     get_directory_property(_directory_flags DEFINITIONS)
+     list(APPEND _compiler_FLAGS ${_directory_flags})
+-    separate_arguments(_compiler_FLAGS)
+ 
+     # we need to recreate the precompiled header for Doom3BFG
+     # (i.e. can't use the one created for idlib before)
+     # because some definitions (e.g. -D__IDLIB__ -D__DOOM_DLL__) differ
+-    if(APPLE)
++    if(APPLE OR EMSCRIPTEN)
+         add_custom_target(precomp_header_rbdoom3bfg)
+     else()
+     add_custom_target(
+@@ -1468,6 +1496,58 @@ else()
+ 
+     add_executable(Doom3BFG WIN32 ${DOOM_SOURCES})
+ 
++    if(EMSCRIPTEN)
++        target_compile_options(Doom3BFG PRIVATE "-sUSE_SDL=2")
++        if(DOOM3BFG_WEB_WORKER_PROFILE)
++            target_compile_options(Doom3BFG PRIVATE "-pthread")
++        endif()
++        target_link_options(
++            Doom3BFG
++            PRIVATE
++                "-sUSE_SDL=2"
++                "-lopenal"
++                "-sMIN_WEBGL_VERSION=2"
++                "-sMAX_WEBGL_VERSION=2"
++                "-sFULL_ES3=1"
++                "-sMODULARIZE=1"
++                "-sEXPORT_ES6=1"
++                "-sEXPORT_NAME=createDoom3BfgEngine"
++                "-sALLOW_MEMORY_GROWTH=1"
++                "-sENVIRONMENT=web"
++                "-sEXIT_RUNTIME=0"
++        )
++        if(DOOM3BFG_WEB_WORKER_PROFILE)
++            target_link_options(
++                Doom3BFG
++                PRIVATE
++                    "-pthread"
++                    "-sPROXY_TO_PTHREAD=1"
++                    "-sPTHREAD_POOL_SIZE=1"
++                    "-sASYNCIFY=1"
++                    "-sSTACK_SIZE=2097152"
++                    "-sDEFAULT_PTHREAD_STACK_SIZE=2097152"
++                    "-sOFFSCREENCANVAS_SUPPORT=1"
++                    "-sFORCE_FILESYSTEM=1"
++                    "-lworkerfs.js"
++                    "-lidbfs.js"
++            )
++            # Re-link when the patched Emscripten worker runtime changes.
++            set_property(
++                TARGET Doom3BFG APPEND PROPERTY LINK_DEPENDS
++                    "${CMAKE_CURRENT_SOURCE_DIR}/../../patches/emsdk/workerfs-pthread-staged-files.patch"
++                    "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/apply-emsdk-patches.ps1"
++            )
++        endif()
++        target_link_libraries(Doom3BFG PRIVATE idlib)
++        set_target_properties(
++            Doom3BFG
++            PROPERTIES
++                OUTPUT_NAME doom3_bfg_web
++                SUFFIX ".js"
++                RUNTIME_OUTPUT_DIRECTORY "${DOOM3BFG_WEB_OUTPUT_DIR}"
++        )
++    endif()
++
+     # make sure precompiled header is created before executable is compiled
+     add_dependencies(Doom3BFG precomp_header_rbdoom3bfg)
+ 
+@@ -1509,6 +1589,7 @@ else()
+         )
+     endif()
+ 
++
+     if(APPLE)
+         find_library(OPENGL_FRAMEWORK OpenGL)
+         target_link_libraries(

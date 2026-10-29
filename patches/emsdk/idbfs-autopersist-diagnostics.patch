@@ -1,0 +1,13 @@
+--- a/src/lib/libidbfs.js
++++ b/src/lib/libidbfs.js
+@@ -36,2 +36,9 @@
+-      function onPersistComplete() {
++      function onPersistComplete(persistError) {
++        if (persistError) {
++          var detail = String(persistError);
++          console.error('[DOOM 3 BFG Web] IDBFS auto-persist failed at ' + mount.mountpoint + ': ' + detail);
++          if (typeof Module !== 'undefined') Module['idbfsLastPersistError'] = detail;
++        } else if (typeof Module !== 'undefined') {
++          Module['idbfsLastPersistError'] = null;
++        }
+         if (mount.idbPersistState === 'again') startPersist(); // If a new sync request has appeared in between, kick off a new sync

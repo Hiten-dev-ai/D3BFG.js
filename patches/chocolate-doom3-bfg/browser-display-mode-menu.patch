@@ -1,0 +1,94 @@
+diff --git a/neo/d3xp/menus/MenuScreen_Shell_Resolution.cpp b/neo/d3xp/menus/MenuScreen_Shell_Resolution.cpp
+index e54dd5a..0000000 100644
+--- a/neo/d3xp/menus/MenuScreen_Shell_Resolution.cpp
++++ b/neo/d3xp/menus/MenuScreen_Shell_Resolution.cpp
+@@ -147,10 +147,20 @@ void idMenuScreen_Shell_Resolution::ShowScreen(const mainMenuTransition_t transi
+     originalOption.vidmode = r_vidMode.GetInteger();
+ 
+     idList<idList<idStr, TAG_IDLIB_LIST_MENU>, TAG_IDLIB_LIST_MENU> menuOptions;
+-    menuOptions.Alloc().Alloc() = "#str_swf_disabled";
++#if defined(__EMSCRIPTEN__)
++    optionData.Clear();
++#endif
++    menuOptions.Alloc().Alloc() = "Windowed";
+     optionData.Append(optionData_t(0, 0));
+ 
+     int viewIndex = 0;
++#if defined(__EMSCRIPTEN__)
++    menuOptions.Alloc().Alloc() = "Fullscreen";
++    optionData.Append(optionData_t(-2, 0));
++    if (originalOption.fullscreen == -2) {
++        viewIndex = 1;
++    }
++#else
+     // SRS - Added support for selecting borderless fullscreen window mode
+     idStr bw_str;
+     bw_str.Append(va("%s", "Borderless Fullscreen"));
+@@ -160,8 +170,14 @@ void idMenuScreen_Shell_Resolution::ShowScreen(const mainMenuTransition_t transi
+         viewIndex = menuOptions.Num() - 1;
+     }
+     // SRS end
++#endif
+     idList<idList<vidMode_t>> displays;
+-    for (int displayNum = 0;; displayNum++) {
++#if defined(__EMSCRIPTEN__)
++    const int firstDisplay = originalOption.fullscreen != 0 ? 0 : -1;
++#else
++    const int firstDisplay = 0;
++#endif
++    for (int displayNum = firstDisplay; displayNum >= 0; displayNum++) {
+         idList<vidMode_t>& modeList = displays.Alloc();
+         if (!R_GetModeListForDisplay(displayNum, modeList)) {
+             displays.RemoveIndex(displays.Num() - 1);
+@@ -252,7 +268,11 @@ bool idMenuScreen_Shell_Resolution::HandleAction(idWidgetAction& action, const i
+             }
+             const optionData_t& currentOption = optionData[options->GetViewIndex()];
+ 
+-            if (currentOption == originalOption) {
++            if (currentOption == originalOption
++#if defined(__EMSCRIPTEN__)
++                || (currentOption.fullscreen == -2 && originalOption.fullscreen != 0)
++#endif
++                ) {
+                 // No change
+                 menuData->SetNextScreen(SHELL_AREA_SYSTEM_OPTIONS, MENU_TRANSITION_SIMPLE);
+             }
+diff --git a/neo/d3xp/menus/MenuScreen_Shell_SystemOptions.cpp b/neo/d3xp/menus/MenuScreen_Shell_SystemOptions.cpp
+index fd84108..0000000 100644
+--- a/neo/d3xp/menus/MenuScreen_Shell_SystemOptions.cpp
++++ b/neo/d3xp/menus/MenuScreen_Shell_SystemOptions.cpp
+@@ -358,9 +358,16 @@ void idMenuScreen_Shell_SystemOptions::idMenuDataSource_SystemSettings::LoadData
+     originalVolume = s_volume_dB.GetFloat();
+ 
+     const int fullscreen = r_fullscreen.GetInteger();
++#if defined(__EMSCRIPTEN__)
++    modeList.Clear();
++    if (fullscreen != 0) {
++        R_GetModeListForDisplay(0, modeList);
++    }
++#else
+     if (fullscreen > 0) {
+         R_GetModeListForDisplay(fullscreen - 1, modeList);
+     } else {
+         modeList.Clear();
+     }
++#endif
+ }
+@@ -492,6 +499,9 @@ idSWFScriptVar idMenuScreen_Shell_SystemOptions::idMenuDataSource_SystemSettings::GetField(const int fieldIndex) const
+     switch (fieldIndex) {
+     case SYSTEM_FIELD_FULLSCREEN: {
+         const int fullscreen = r_fullscreen.GetInteger();
++#if defined(__EMSCRIPTEN__)
++        return fullscreen == 0 ? "Windowed" : "Fullscreen";
++#else
+         const int vidmode = r_vidMode.GetInteger();
+         if (fullscreen == 0) {
+             return "#str_swf_disabled";
+@@ -504,6 +514,7 @@ idSWFScriptVar idMenuScreen_Shell_SystemOptions::idMenuDataSource_SystemSettings::GetField(const int fieldIndex) const
+         } else {
+             return va("%4i x %4i @ %dhz", modeList[vidmode].width, modeList[vidmode].height, modeList[vidmode].displayHz);
+         }
++#endif
+     }
+     case SYSTEM_FIELD_FRAMERATE:
+         return va("%d FPS", com_engineHz.GetInteger());

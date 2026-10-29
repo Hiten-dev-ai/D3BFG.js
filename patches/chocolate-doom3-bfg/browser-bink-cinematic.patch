@@ -1,0 +1,289 @@
+--- a/neo/renderer/Cinematic.cpp
++++ b/neo/renderer/Cinematic.cpp
+@@ -39,6 +39,32 @@
+ //}
+ 
+ #include "tr_local.h"
++
++#if defined(USE_BINKDEC)
++#include "BinkDecoder.h"
++#if defined(__EMSCRIPTEN__)
++#include <emscripten.h>
++EM_ASYNC_JS(int, WebStageBinkResource, (const char* path), {
++  try {
++    if (!Module['stageVideoResource']) throw new Error('Bink video staging is unavailable.');
++    return (await Module['stageVideoResource'](UTF8ToString(path))) ? 1 : 0;
++  } catch (error) {
++    err('[DOOM 3 BFG Web] Bink video staging failed: ' + error);
++    return 0;
++  }
++});
++EM_JS(int, WebReleaseBinkResource, (const char* path), {
++  try {
++    if (!Module['releaseVideoResource']) throw new Error('Bink video release is unavailable.');
++    Module['releaseVideoResource'](UTF8ToString(path));
++    return 1;
++  } catch (error) {
++    err('[DOOM 3 BFG Web] Bink video release failed: ' + error);
++    return 0;
++  }
++});
++#endif
++#endif
+ 
+ #define CIN_system 1
+ #define CIN_loop 2
+@@ -93,6 +119,18 @@
+     cinData_t ImageForTimeFFMPEG(int milliseconds);
+     bool InitFromFFMPEGFile(const char* qpath, bool looping);
+     void FFMPEGReset();
++#endif
++#if defined(USE_BINKDEC) && defined(__EMSCRIPTEN__)
++    BinkDecoder* binkDecoder;
++    idFile* binkFile;
++    idStr binkFileName;
++    ImagePlane binkPlanes[4];
++    bool binkResourceStaged;
++
++    bool InitFromBinkDecFile(const char* qpath, bool looping);
++    bool OpenBinkDecFile();
++    void CloseBinkDecFile(bool releaseResource);
++    cinData_t ImageForTimeBinkDec(int milliseconds);
+ #endif
+     idImage* img;
+     bool isRoQ;
+@@ -373,6 +411,13 @@
+     qStatus[0] = (byte**)Mem_Alloc(32768 * sizeof(byte*), TAG_CINEMATIC);
+     qStatus[1] = (byte**)Mem_Alloc(32768 * sizeof(byte*), TAG_CINEMATIC);
+ 
++#if defined(USE_BINKDEC) && defined(__EMSCRIPTEN__)
++    binkDecoder = NULL;
++    binkFile = NULL;
++    binkResourceStaged = false;
++    memset(binkPlanes, 0, sizeof(binkPlanes));
++#endif
++
+ #if defined(USE_FFMPEG)
+     // Carl: ffmpeg stuff, for bink and normal video files:
+     isRoQ = false;
+@@ -402,6 +447,184 @@
+         img->AllocImage(opts, TF_LINEAR, TR_REPEAT);
+     }
+ }
++
++#if defined(USE_BINKDEC) && defined(__EMSCRIPTEN__)
++bool idCinematicLocal::OpenBinkDecFile()
++{
++    binkFile = fileSystem->OpenFileRead(binkFileName.c_str());
++    if (binkFile == NULL) {
++        common->Warning("Bink video is not available in the virtual file system: '%s'.\n", binkFileName.c_str());
++        return false;
++    }
++
++    binkDecoder = new BinkDecoder();
++    if (!binkDecoder->Open(binkFile, false)) {
++        delete binkDecoder;
++        binkDecoder = NULL;
++        fileSystem->CloseFile(binkFile);
++        binkFile = NULL;
++        return false;
++    }
++
++    return true;
++}
++
++void idCinematicLocal::CloseBinkDecFile(bool releaseResource)
++{
++    if (binkDecoder != NULL) {
++        delete binkDecoder;
++        binkDecoder = NULL;
++    }
++    if (binkFile != NULL) {
++        fileSystem->CloseFile(binkFile);
++        binkFile = NULL;
++    }
++
++    if (releaseResource && binkResourceStaged) {
++        WebReleaseBinkResource(binkFileName.c_str());
++        binkResourceStaged = false;
++        binkFileName.Clear();
++    }
++}
++
++bool idCinematicLocal::InitFromBinkDecFile(const char* qpath, bool amilooping)
++{
++    idStr normalizedPath = qpath;
++    normalizedPath.BackSlashesToSlashes();
++    if (!WebStageBinkResource(normalizedPath.c_str())) {
++        animationLength = 0;
++        return false;
++    }
++
++    binkFileName = normalizedPath;
++    binkResourceStaged = true;
++    if (!OpenBinkDecFile()) {
++        CloseBinkDecFile(true);
++        animationLength = 0;
++        return false;
++    }
++
++    const uint32_t frameCount = binkDecoder->GetNumFrames();
++    const float framesPerSecond = binkDecoder->GetFrameRate();
++    const uint32_t width = binkDecoder->frameWidth;
++    const uint32_t height = binkDecoder->frameHeight;
++    if (frameCount == 0 || framesPerSecond <= 0.0f || width == 0 || height == 0 ||
++        (uint64_t)width * (uint64_t)height > (uint64_t)INT_MAX / 4) {
++        common->Warning("Bink video has invalid dimensions or timing: '%s'.\n", binkFileName.c_str());
++        CloseBinkDecFile(true);
++        animationLength = 0;
++        return false;
++    }
++
++    CIN_WIDTH = (int)width;
++    CIN_HEIGHT = (int)height;
++    frameRate = framesPerSecond;
++    animationLength = (int)(((double)frameCount * 1000.0) / (double)framesPerSecond);
++    looping = amilooping;
++    isRoQ = false;
++    startTime = Sys_Milliseconds();
++    image = (byte*)Mem_Alloc((size_t)CIN_WIDTH * CIN_HEIGHT * 4, TAG_CINEMATIC);
++    if (image == NULL) {
++        CloseBinkDecFile(true);
++        animationLength = 0;
++        return false;
++    }
++
++    status = FMV_PLAY;
++    ImageForTimeBinkDec(startTime);
++    status = looping ? FMV_PLAY : FMV_IDLE;
++    return true;
++}
++
++cinData_t idCinematicLocal::ImageForTimeBinkDec(int thisTime)
++{
++    cinData_t cinData;
++    memset(&cinData, 0, sizeof(cinData));
++
++    if (r_skipDynamicTextures.GetBool() || status == FMV_EOF || status == FMV_IDLE || binkDecoder == NULL) {
++        return cinData;
++    }
++
++    if (thisTime <= 0) {
++        thisTime = Sys_Milliseconds();
++    }
++    if (startTime <= 0) {
++        startTime = thisTime;
++    }
++
++    const uint32_t frameCount = binkDecoder->GetNumFrames();
++    if (frameCount == 0 || frameRate <= 0.0f) {
++        status = FMV_IDLE;
++        return cinData;
++    }
++
++    const int elapsed = Max(0, thisTime - startTime);
++    uint64_t desiredFrame = (uint64_t)(((double)elapsed * (double)frameRate) / 1000.0);
++    if (looping) {
++        desiredFrame %= frameCount;
++    } else if (desiredFrame >= frameCount) {
++        status = FMV_IDLE;
++        return cinData;
++    }
++
++    uint32_t nextFrame = binkDecoder->GetCurrentFrameNum();
++    if (nextFrame > 0 && desiredFrame + 1 < nextFrame) {
++        // Bink frames depend on prior frames, so loop/reverse-time resets must
++        // reopen the VFS stream instead of jumping with GotoFrame().
++        CloseBinkDecFile(false);
++        if (!OpenBinkDecFile()) {
++            status = FMV_IDLE;
++            return cinData;
++        }
++        nextFrame = 0;
++    }
++
++    while (nextFrame <= desiredFrame && nextFrame < frameCount) {
++        memset(binkPlanes, 0, sizeof(binkPlanes));
++        binkDecoder->GetNextFrame(binkPlanes);
++        nextFrame = binkDecoder->GetCurrentFrameNum();
++    }
++
++    const ImagePlane& yPlane = binkPlanes[0];
++    const ImagePlane& uPlane = binkPlanes[1];
++    const ImagePlane& vPlane = binkPlanes[2];
++    if (yPlane.data == NULL || uPlane.data == NULL || vPlane.data == NULL ||
++        yPlane.width < (uint32_t)CIN_WIDTH || yPlane.height < (uint32_t)CIN_HEIGHT ||
++        yPlane.pitch < (uint32_t)CIN_WIDTH || uPlane.pitch < ((uint32_t)CIN_WIDTH + 1) / 2 ||
++        vPlane.pitch < ((uint32_t)CIN_WIDTH + 1) / 2) {
++        status = FMV_IDLE;
++        return cinData;
++    }
++
++    const bool hasAlpha = binkPlanes[3].data != NULL && binkPlanes[3].pitch >= (uint32_t)CIN_WIDTH;
++    for (int y = 0; y < CIN_HEIGHT; ++y) {
++        const byte* yRow = yPlane.data + y * yPlane.pitch;
++        const byte* uRow = uPlane.data + (y >> 1) * uPlane.pitch;
++        const byte* vRow = vPlane.data + (y >> 1) * vPlane.pitch;
++        const byte* alphaRow = hasAlpha ? binkPlanes[3].data + y * binkPlanes[3].pitch : NULL;
++        byte* dst = image + (size_t)y * CIN_WIDTH * 4;
++        for (int x = 0; x < CIN_WIDTH; ++x) {
++            const int c = Max(0, (int)yRow[x] - 16);
++            const int d = (int)uRow[x >> 1] - 128;
++            const int e = (int)vRow[x >> 1] - 128;
++            const int r = idMath::ClampInt(0, 255, (298 * c + 409 * e + 128) >> 8);
++            const int g = idMath::ClampInt(0, 255, (298 * c - 100 * d - 208 * e + 128) >> 8);
++            const int b = idMath::ClampInt(0, 255, (298 * c + 516 * d + 128) >> 8);
++            dst[x * 4 + 0] = (byte)r;
++            dst[x * 4 + 1] = (byte)g;
++            dst[x * 4 + 2] = (byte)b;
++            dst[x * 4 + 3] = hasAlpha ? alphaRow[x] : 255;
++        }
++    }
++
++    cinData.imageWidth = CIN_WIDTH;
++    cinData.imageHeight = CIN_HEIGHT;
++    cinData.status = status;
++    img->UploadScratch(image, CIN_WIDTH, CIN_HEIGHT);
++    cinData.image = img;
++    return cinData;
++}
++#endif
+ 
+ /*
+ ==============
+@@ -589,6 +812,10 @@
+         fileName = temp;
+         idLib::Warning("New filename: '%s'\n", fileName.c_str());
+         return InitFromFFMPEGFile(fileName.c_str(), amilooping);
++#elif defined(USE_BINKDEC) && defined(__EMSCRIPTEN__)
++        idStr binkFileName = fileName.StripFileExtension() + ".bik";
++        animationLength = 0;
++        return InitFromBinkDecFile(binkFileName.c_str(), amilooping);
+ #else
+         animationLength = 0;
+         return false;
+@@ -634,6 +861,12 @@
+ */
+ void idCinematicLocal::Close()
+ {
++#if defined(USE_BINKDEC) && defined(__EMSCRIPTEN__)
++    // Destroy the decoder and close its VFS file before releasing the staged
++    // browser resource; FileStream keeps a non-owning idFile pointer.
++    CloseBinkDecFile(true);
++#endif
++
+     if (image) {
+         Mem_Free((void*)image);
+         image = NULL;
+@@ -700,6 +933,11 @@
+ */
+ cinData_t idCinematicLocal::ImageForTime(int thisTime)
+ {
++#if defined(USE_BINKDEC) && defined(__EMSCRIPTEN__)
++    if (binkDecoder != NULL) {
++        return ImageForTimeBinkDec(thisTime);
++    }
++#endif
+ #if defined(USE_FFMPEG)
+     // Carl: Handle BFG format BINK videos separately
+     if (!isRoQ)

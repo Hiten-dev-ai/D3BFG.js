@@ -1,0 +1,41 @@
+diff --git a/neo/framework/Common.cpp b/neo/framework/Common.cpp
+--- a/neo/framework/Common.cpp
++++ b/neo/framework/Common.cpp
+@@ -1257,14 +1257,18 @@
+         const bool showVideo = (!com_skipIntroVideos.GetBool() && fileSystem->UsingResourceFiles());
+         if (showVideo) {
+             RenderBink("video\\loadvideo.bik");
++#ifndef __EMSCRIPTEN__
+             RenderSplash();
+             RenderSplash();
++#endif
+         } else {
+             idLib::Printf("Skipping Intro Videos!\n");
+             // display the legal splash screen
+             // No clue why we have to render this twice to show up...
++#ifndef __EMSCRIPTEN__
+             RenderSplash();
+             RenderSplash();
++#endif
+         }
+         idLib::Printf("[web-port trace] Common legal splash rendered\n");
+ 
+@@ -1352,12 +1356,18 @@
+         // Browser initialization can take longer than the splash minimum.
+         // Start the visible-time interval only after startup work has finished.
+         legalStartTime = Sys_Milliseconds();
++        // Discard startup input so an Enter/Space used while the canvas starts
++        // cannot skip the visible legal screen or activate the first menu.
++        Sys_ClearEvents();
+ #endif
+         while (Sys_Milliseconds() - legalStartTime < legalMinTime) {
+             RenderSplash();
+             Sys_GenerateEvents();
+             Sys_Sleep(10);
+         };
++#ifdef __EMSCRIPTEN__
++        Sys_ClearEvents();
++#endif
+ 
+         // print all warnings queued during initialization
+         PrintWarnings();

@@ -1,0 +1,59 @@
+diff --git a/neo/renderer/tr_backend_draw.cpp b/neo/renderer/tr_backend_draw.cpp
+index 6c7cd54..b1e9707 100644
+--- a/neo/renderer/tr_backend_draw.cpp
++++ b/neo/renderer/tr_backend_draw.cpp
+@@ -100,6 +100,26 @@ static void RB_WebPortTracePassPixels(const char* passName, int numDrawSurfs)
+ #endif
+ }
+ 
++#if defined(__EMSCRIPTEN__)
++static int webPortAmbientStageTraceCount = 0;
++
++static void RB_WebPortTraceAmbientStage(const char* kind, int surfaceIndex, const idMaterial* material,
++    int stageIndex, int stageCount, const drawSurf_t* surf, uint64 state, const char* texture0, const char* texture1)
++{
++    if (!r_webPortPassTrace.GetBool() || webPortAmbientStageTraceCount >= 24 ||
++        material == NULL || surf == NULL || backEnd.viewDef == NULL || backEnd.viewDef->viewEntitys == NULL) {
++        return;
++    }
++
++    common->Printf("[web-port ambient] draw=%d kind=%s material=%s surface=%d stage=%d/%d program=%d state=0x%x indexes=%d textures=%s,%s scissor=%d,%d-%d,%d\n",
++        webPortAmbientStageTraceCount + 1, kind, material->GetName(), surfaceIndex, stageIndex, stageCount,
++        renderProgManager.GetGLSLCurrentProgram(), (unsigned int)state, surf->numIndexes,
++        texture0 != NULL ? texture0 : "null", texture1 != NULL ? texture1 : "null",
++        surf->scissorRect.x1, surf->scissorRect.y1, surf->scissorRect.x2, surf->scissorRect.y2);
++    webPortAmbientStageTraceCount++;
++}
++#endif
++
+ /*
+ ================
+ SetVertexParm
+@@ -2363,6 +2383,14 @@ static int RB_DrawShaderPasses(const drawSurf_t* const* const drawSurfs, const i
+                     }
+                 }
+ 
++#if defined(__EMSCRIPTEN__)
++                const char* traceTexture0 = newStage->numFragmentProgramImages > 0 && newStage->fragmentProgramImages[0] != NULL
++                    ? newStage->fragmentProgramImages[0]->GetName() : "null";
++                const char* traceTexture1 = newStage->numFragmentProgramImages > 1 && newStage->fragmentProgramImages[1] != NULL
++                    ? newStage->fragmentProgramImages[1]->GetName() : "null";
++                RB_WebPortTraceAmbientStage("new", i, shader, stage, shader->GetNumStages(), surf, stageGLState, traceTexture0, traceTexture1);
++#endif
++
+                 // draw it
+                 RB_DrawElementsWithCounters(surf);
+ 
+@@ -2472,6 +2500,12 @@ static int RB_DrawShaderPasses(const drawSurf_t* const* const drawSurfs, const i
+ 
+             RB_PrepareStageTexturing(pStage, surf);
+ 
++#if defined(__EMSCRIPTEN__)
++            const char* traceTexture = pStage->texture.image != NULL ? pStage->texture.image->GetName() :
++                (pStage->texture.cinematic != NULL ? "cinematic" : "null");
++            RB_WebPortTraceAmbientStage("old", i, shader, stage, shader->GetNumStages(), surf, stageGLState, traceTexture, NULL);
++#endif
++
+             // draw it
+             RB_DrawElementsWithCounters(surf);
+ 

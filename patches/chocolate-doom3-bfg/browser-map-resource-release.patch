@@ -1,0 +1,33 @@
+diff --git a/neo/framework/Common_load.cpp b/neo/framework/Common_load.cpp
+index a9666af..f16b686 100644
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -40,7 +40,16 @@ EM_ASYNC_JS(int, WebStageMapResources, (const char* mapName), {
+     return 0;
+   }
+ });
+-
++EM_ASYNC_JS(int, WebReleaseMapResourcesExcept, (const char* mapName), {
++  try {
++    if (!Module['releaseMapResourcesExcept']) throw new Error('Map resource release is unavailable in the engine worker.');
++    await Module['releaseMapResourcesExcept'](UTF8ToString(mapName));
++    return 1;
++  } catch (error) {
++    err('[DOOM 3 BFG Web] Map archive release failed: ' + error);
++    return 0;
++  }
++});
+ #endif
+ 
+ #include "Common_local.h"
+@@ -572,7 +581,9 @@ void idCommonLocal::ExecuteMapChange()
+     common->Printf("%6d msec to unload map\n", ms);
+ #ifdef __EMSCRIPTEN__
+     common->Printf("[web-port map] UnloadMap returned elapsed=%d ms\n", ms);
+-
++    if (!WebReleaseMapResourcesExcept(currentMapName.c_str())) {
++        common->Warning("Could not release prior map archives after unloading '%s'.\n", currentMapName.c_str());
++    }
+ #endif
+ 
+     // Free media from previous level and

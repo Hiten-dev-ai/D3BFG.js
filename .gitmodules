@@ -1,0 +1,3 @@
+[submodule "engine/chocolate-doom3-bfg"]
+	path = engine/chocolate-doom3-bfg
+	url = https://github.com/klaussilveira/chocolate-doom3-bfg.git

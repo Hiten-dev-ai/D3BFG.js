@@ -1,0 +1,51 @@
+diff --git a/neo/framework/Common_load.cpp b/neo/framework/Common_load.cpp
+index a058f20..2247caf 100644
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -496,14 +496,19 @@ void idCommonLocal::ExecuteMapChange()
+     insideExecuteMapChange = true;
+ 
+ #ifdef __EMSCRIPTEN__
++    // Start the native transition before awaiting the map archive so its
++    // loading GUI is already visible while the browser stages the resources.
++    StartWipe("wipeMaterial", true);
++    CompleteWipe();
+ 
+     currentMapName = matchParameters.mapName;
+     currentMapName.StripFileExtension();
+     common->Printf("[web-port map] ExecuteMapChange reached map=%s\n", currentMapName.c_str());
+     // Keep the level transition inside the game's native loading UI while the
+-    // on-demand map archive is downloaded and staged in OPFS.
++    // browser downloads and stages the on-demand map archive.
+     bool webStagingLoadScreenHellMap = false;
+     LoadLoadingGui(currentMapName, webStagingLoadScreenHellMap);
++    ClearWipe();
+     UpdateScreen(false);
+     common->Printf("[web-port map] native loading screen presented before archive staging\n");
+     const bool webMapStaged = WebStageMapResources(currentMapName.c_str());
+@@ -568,9 +573,10 @@ void idCommonLocal::ExecuteMapChange()
+ 
+     // Native builds start the wipe here. Browser builds began it before
+     // archive staging so the native loading GUI remains visible during fetch.
+-    StartWipe("wipeMaterial", true);
+-    CompleteWipe();
+-
++#ifndef __EMSCRIPTEN__
++    StartWipe("wipeMaterial", true);
++    CompleteWipe();
++#endif
+ 
+     int sm = Sys_Milliseconds();
+     // shut down the existing game if it is running
+@@ -618,8 +624,9 @@ void idCommonLocal::ExecuteMapChange()
+ #endif
+ 
+     // Stop rendering the wipe
+-    ClearWipe();
+-
++#ifndef __EMSCRIPTEN__
++    ClearWipe();
++#endif
+ 
+     if (fileSystem->UsingResourceFiles()) {
+         idStrStatic<MAX_OSPATH> manifestName = currentMapName;

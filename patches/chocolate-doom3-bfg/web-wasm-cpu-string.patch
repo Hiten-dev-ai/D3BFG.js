@@ -1,0 +1,11 @@
+diff --git a/neo/idlib/sys/sys_defines.h b/neo/idlib/sys/sys_defines.h
+--- a/neo/idlib/sys/sys_defines.h
++++ b/neo/idlib/sys/sys_defines.h
+@@ -119,5 +119,7 @@
+ 		#elif defined(__riscv__) || defined(__riscv)
+ 			#define CPUSTRING						"riscv"
++		#elif defined(__wasm32__) || defined(__wasm64__)
++			#define CPUSTRING						"wasm"
+ 		#elif defined(__sparc__) || defined(__sparc)
+ 			#define CPUSTRING						"sparc"
+ 		#elif defined(__loongarch64)

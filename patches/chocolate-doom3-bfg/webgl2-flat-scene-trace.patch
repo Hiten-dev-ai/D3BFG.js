@@ -1,0 +1,51 @@
+diff --git a/neo/renderer/tr_backend_draw.cpp b/neo/renderer/tr_backend_draw.cpp
+--- a/neo/renderer/tr_backend_draw.cpp
++++ b/neo/renderer/tr_backend_draw.cpp
+@@ -46,6 +46,7 @@ idCVar r_skipInteractionFastPath("r_skipInteractionFastPath", "1", CVAR_RENDERER
+ idCVar r_useLightStencilSelect("r_useLightStencilSelect", "0", CVAR_RENDERER | CVAR_BOOL, "use stencil select pass");
+ idCVar r_webPortDrawTrace("r_webPortDrawTrace", "0", CVAR_RENDERER | CVAR_BOOL, "trace a few opaque WebGL draws for browser renderer debugging");
+ idCVar r_webPortPassTrace("r_webPortPassTrace", "0", CVAR_RENDERER | CVAR_BOOL, "sample WebGL color after scene render passes for browser renderer debugging");
++idCVar r_webPortFlatTrace("r_webPortFlatTrace", "0", CVAR_RENDERER | CVAR_BOOL, "draw opaque scene surfaces in a solid diagnostic color");
+ 
+ extern idCVar stereoRender_swapEyes;
+ 
+@@ -1111,6 +1112,19 @@ static void RB_DrawSingleInteraction(drawInteraction_t* din)
+         return;
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    if (r_webPortFlatTrace.GetBool()) {
++        float flatTraceColor[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
++        GL_State(GLS_DEPTHFUNC_ALWAYS | GLS_DEPTHMASK);
++        renderProgManager.BindShader_Color();
++        GL_Color(flatTraceColor);
++        RB_DrawElementsWithCounters(din->surf);
++        renderProgManager.Unbind();
++        GL_State(GLS_DEFAULT);
++        return;
++    }
++#endif
++
+     if (din->diffuseImage == NULL || r_skipDiffuse.GetBool()) {
+         // this isn't a YCoCg black, but it doesn't matter, because
+         // the diffuseColor will also be 0
+@@ -2252,6 +2266,19 @@ static int RB_DrawShaderPasses(const drawSurf_t* const* const drawSurfs, const i
+             surfGLState = GLS_POLYGON_OFFSET;
+         }
+ 
++#if defined(__EMSCRIPTEN__)
++        if (r_webPortFlatTrace.GetBool() && shader->Coverage() == MC_OPAQUE) {
++            float flatTraceColor[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
++            GL_State(GLS_DEPTHFUNC_ALWAYS | GLS_DEPTHMASK);
++            renderProgManager.BindShader_Color();
++            GL_Color(flatTraceColor);
++            RB_DrawElementsWithCounters(surf);
++            renderProgManager.Unbind();
++            GL_State(GLS_DEFAULT);
++            continue;
++        }
++#endif
++
+         for (int stage = 0; stage < shader->GetNumStages(); stage++) {
+             const shaderStage_t* pStage = shader->GetStage(stage);
+ 

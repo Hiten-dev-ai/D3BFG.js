@@ -1,0 +1,142 @@
+diff --git a/neo/framework/Common.cpp b/neo/framework/Common.cpp
+--- a/neo/framework/Common.cpp
++++ b/neo/framework/Common.cpp
+@@ -340,6 +340,9 @@
+ */
+ void idCommonLocal::AddStartupCommands()
+ {
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port startup] phase=startup-commands-queued count=%d time=%d ms\n", com_numConsoleLines, Sys_Milliseconds());
++#endif
+     // quote every token, so args with semicolons can work
+     for (int i = 0; i < com_numConsoleLines; i++) {
+         if (!com_consoleLines[i].Argc()) {
+@@ -1078,6 +1081,10 @@
+ idCommonLocal::Init
+ =================
+ */
++#if defined(__EMSCRIPTEN__)
++static int webStartupStartTime = 0;
++#endif
++
+ void idCommonLocal::Init(int argc, const char* const* argv, const char* cmdline)
+ {
+     try {
+@@ -1089,6 +1096,10 @@
+ 
+         // initialize idLib
+         idLib::Init();
++#if defined(__EMSCRIPTEN__)
++        webStartupStartTime = Sys_Milliseconds();
++        common->Printf("[web-port startup] phase=common-init-begin elapsed=0 ms\n");
++#endif
+ 
+         // clear warning buffer
+         ClearWarnings(GAME_NAME " initialization");
+@@ -1230,33 +1244,63 @@
+             RenderSplash();
+             RenderSplash();
+         }
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common legal splash rendered\n");
++#endif
+ 
+         int legalStartTime = Sys_Milliseconds();
+         declManager->Init2();
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common decl Init2 complete\n");
++#endif
+ 
+         // initialize string database so we can use it for loading messages
+         InitLanguageDict();
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common language dictionary complete\n");
++#endif
+ 
+         // spawn the game thread, even if we are going to run without SMP
+         // one meg stack, because it can parse decls from gui surfaces (unfortunately)
+         // use a lower priority so job threads can run on the same core
++#if defined(__EMSCRIPTEN__)
++        common->Printf("[web-port startup] phase=game-thread-start elapsed=%d ms\n", Sys_Milliseconds() - webStartupStartTime);
++#endif
+         gameThread.StartWorkerThread("Game/Draw", CORE_1B, THREAD_BELOW_NORMAL, 0x100000);
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common game thread started\n");
++#endif
++#if defined(__EMSCRIPTEN__)
++        common->Printf("[web-port startup] phase=game-thread-ready elapsed=%d ms\n", Sys_Milliseconds() - webStartupStartTime);
++#endif
+         // boost this thread's priority, so it will prevent job threads from running while
+         // the render back end still has work to do
+ 
+         // init the user command input code
+         usercmdGen->Init();
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common usercmd input initialized\n");
++#endif
+ 
+         Sys_SetRumble(0, 0, 0);
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common rumble initialized\n");
++#endif
+ 
+         // initialize the user interfaces
+         uiManager->Init();
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common UI manager initialized\n");
++#endif
+ 
+         // startup the script debugger
+         // DebuggerServerInit();
+ 
+         // load the game dll
+         LoadGameDLL();
++#if defined(__EMSCRIPTEN__)
++        idLib::Printf("[web-port trace] Common game module loaded\n");
++#endif
+ 
+         // On the PC touch them all so they get included in the resource build
+         if (!fileSystem->UsingResourceFiles()) {
+@@ -1345,6 +1373,9 @@
+         // RB end
+ 
+         com_fullyInitialized = true;
++#if defined(__EMSCRIPTEN__)
++        common->Printf("[web-port startup] phase=common-init-complete elapsed=%d ms\n", Sys_Milliseconds() - webStartupStartTime);
++#endif
+ 
+         // No longer need the splash screen
+         if (splashScreen != NULL) {
+diff --git a/neo/framework/Common_load.cpp b/neo/framework/Common_load.cpp
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -346,6 +464,9 @@
+ */
+ void idCommonLocal::ExecuteMapChange()
+ {
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port startup] phase=execute-map-change-begin map=%s time=%d ms\n", session->GetActingGameStateLobbyBase().GetMatchParms().mapName.c_str(), Sys_Milliseconds());
++#endif
+     if (session->GetState() != idSession::LOADING) {
+         idLib::Warning("Session state is not LOADING in ExecuteMapChange");
+         return;
+@@ -1118,6 +1319,9 @@
+ */
+ CONSOLE_COMMAND_SHIP(map, "loads a map", idCmdSystem::ArgCompletion_MapName)
+ {
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port startup] phase=dispatch-map map=%s time=%d ms\n", args.Argv(1), Sys_Milliseconds());
++#endif
+     commonLocal.StartNewGame(args.Argv(1), false, GAME_MODE_SINGLEPLAYER);
+ }
+ 
+@@ -1142,6 +1346,9 @@
+ */
+ CONSOLE_COMMAND_SHIP(devmap, "loads a map in developer mode", idCmdSystem::ArgCompletion_MapName)
+ {
++#if defined(__EMSCRIPTEN__)
++    common->Printf("[web-port startup] phase=dispatch-devmap map=%s time=%d ms\n", args.Argv(1), Sys_Milliseconds());
++#endif
+     commonLocal.StartNewGame(args.Argv(1), true, GAME_MODE_SINGLEPLAYER);
+ }
+ 

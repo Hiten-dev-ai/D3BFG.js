@@ -1,0 +1,14 @@
+diff --git a/neo/renderer/RenderSystem_init.cpp b/neo/renderer/RenderSystem_init.cpp
+--- a/neo/renderer/RenderSystem_init.cpp
++++ b/neo/renderer/RenderSystem_init.cpp
+@@ -551,4 +551,9 @@
+         qglProgramLocalParameter4fvARB = (PFNGLPROGRAMLOCALPARAMETER4FVARBPROC)GLimp_ExtensionPointer("glProgramLocalParameter4fv", true); // XXX: unused
+ 
+-        qglGetIntegerv(GL_MAX_TEXTURE_COORDS_ARB, (GLint*)&glConfig.maxTextureCoords);
++#if defined(__EMSCRIPTEN__)
++        // WebGL2 has no fixed-function texture-coordinate limit to query.
++        glConfig.maxTextureCoords = 0;
++#else
++        qglGetIntegerv(GL_MAX_TEXTURE_COORDS_ARB, (GLint*)&glConfig.maxTextureCoords);
++#endif
+         qglGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, (GLint*)&glConfig.maxTextureImageUnits);

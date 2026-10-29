@@ -1,0 +1,12 @@
+--- a/neo/sys/common/savegame.cpp
++++ b/neo/sys/common/savegame.cpp
+@@ -731,5 +731,7 @@
+-        if ((data.saveLoadParms->mode & SAVEGAME_MBF_SAVE) && ret == ERROR_SUCCESS &&
++        const int browserMutatingSaveModes = SAVEGAME_MBF_SAVE | SAVEGAME_MBF_DELETE_FOLDER |
++            SAVEGAME_MBF_DELETE_ALL_FOLDERS | SAVEGAME_MBF_DELETE_FILES;
++        if ((data.saveLoadParms->mode & browserMutatingSaveModes) && ret == ERROR_SUCCESS &&
+             data.saveLoadParms->errorCode == SAVEGAME_E_NONE && !WebFlushBrowserSaveData()) {
+-            idLib::Warning("Could not persist the completed save to browser storage.");
++            idLib::Warning("Could not persist save changes to browser storage.");
+             data.saveLoadParms->errorCode = SAVEGAME_E_UNKNOWN;
+             ret = -1;

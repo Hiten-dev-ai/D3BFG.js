@@ -1,0 +1,328 @@
+diff --git a/neo/framework/FileSystem.cpp b/neo/framework/FileSystem.cpp
+index 0318981..f7a9cdd 100644
+--- a/neo/framework/FileSystem.cpp
++++ b/neo/framework/FileSystem.cpp
+@@ -1745,6 +1745,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     const bool traceHudB = idStr::Icmp(relativePath, "guis/assets/hud/controller/xb360/b.tga") == 0;
+     const bool traceFloorGrate = idStr::Icmp(relativePath, "textures/washroom/rffloorgrate01.tga") == 0 ||
+         strstr(relativePath, "generated/images/textures/washroom/rffloorgrate01#") != NULL;
++    const bool traceSkScan1 = idStr::Icmp(relativePath, "guis/assets/medical/skscan1.tga") == 0 ||
++        strstr(relativePath, "generated/images/guis/assets/medical/skscan1#") != NULL;
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left ReadFile started buffer=%d\n", buffer != NULL);
+     }
+@@ -1754,5 +1756,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceFloorGrate) {
+         idLib::Printf("[web-port image] floorgrate ReadFile started path=%s buffer=%d\n", relativePath, buffer != NULL);
+     }
++    if (traceSkScan1) {
++        idLib::Printf("[web-port image] skscan1 ReadFile started path=%s buffer=%d\n", relativePath, buffer != NULL);
++    }
+ #endif
+ 
+@@ -1811,5 +1815,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceFloorGrate) {
+         idLib::Printf("[web-port image] floorgrate OpenFileRead started\n");
+     }
++    if (traceSkScan1) {
++        idLib::Printf("[web-port image] skscan1 OpenFileRead started\n");
++    }
+ #endif
+     f = OpenFileRead(relativePath, (buffer != NULL));
+@@ -1824,7 +1830,11 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceFloorGrate) {
+         idLib::Printf("[web-port image] floorgrate OpenFileRead returned found=%d\n", f != NULL);
+     }
++    if (traceSkScan1) {
++        idLib::Printf("[web-port image] skscan1 OpenFileRead returned found=%d\n", f != NULL);
++    }
+ #endif
+     if (f == NULL) {
++        if (traceSkScan1) idLib::Printf("[web-port image] skscan1 ReadFile returned missing\n");
+         // RB: moved here
+         if (buffer == NULL && timestamp != NULL && resourceFiles.Num() > 0) {
+@@ -1857,6 +1866,7 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+         CloseFile(f);
+ #if defined(__EMSCRIPTEN__)
+         if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate ReadFile metadata returned bytes=%d\n", len);
++        if (traceSkScan1) idLib::Printf("[web-port image] skscan1 ReadFile metadata returned bytes=%d\n", len);
+ #endif
+         return len;
+     }
+@@ -1877,5 +1887,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceFloorGrate) {
+         idLib::Printf("[web-port image] floorgrate ordinary file read started bytes=%d\n", len);
+     }
++    if (traceSkScan1) {
++        idLib::Printf("[web-port image] skscan1 ordinary file read started bytes=%d\n", len);
++    }
+ #endif
+     f->Read(buf, len);
+@@ -1890,5 +1902,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceFloorGrate) {
+         idLib::Printf("[web-port image] floorgrate ordinary file read returned\n");
+     }
++    if (traceSkScan1) {
++        idLib::Printf("[web-port image] skscan1 ordinary file read returned\n");
++    }
+ #endif
+ 
+@@ -2974,6 +2988,9 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+     const bool traceFloorGrate = fileName != NULL &&
+         (idStr::Icmp(fileName, "textures/washroom/rffloorgrate01.tga") == 0 ||
+             strstr(fileName, "generated/images/textures/washroom/rffloorgrate01#") != NULL);
++    const bool traceSkScan1 = fileName != NULL &&
++        (idStr::Icmp(fileName, "guis/assets/medical/skscan1.tga") == 0 ||
++            strstr(fileName, "generated/images/guis/assets/medical/skscan1#") != NULL);
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
+     }
+@@ -2983,5 +3000,8 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+     if (traceFloorGrate) {
+         idLib::Printf("[web-port image] floorgrate resource lookup started path=%s memFile=%d containers=%d\n", fileName, memFile, resourceFiles.Num());
+     }
++    if (traceSkScan1) {
++        idLib::Printf("[web-port image] skscan1 resource lookup started path=%s memFile=%d containers=%d\n", fileName, memFile, resourceFiles.Num());
++    }
+ #endif
+ 
+@@ -2992,6 +3011,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             idLib::Printf("[web-port map] eye_left resource lookup returned no containers\n");
+         }
+         if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource lookup returned no containers\n");
++        if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource lookup returned no containers\n");
+ #endif
+         return NULL;
+     }
+@@ -2999,6 +3019,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+     static idResourceCacheEntry rc;
+ #if defined(__EMSCRIPTEN__)
+     if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource index lookup started\n");
++    if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource index lookup started\n");
+ #endif
+     const bool resourceFound = GetResourceCacheEntry(fileName, rc);
+ #if defined(__EMSCRIPTEN__)
+@@ -3009,6 +3030,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             idLib::Printf("[web-port image] hud_b resource lookup returned found=%d\n", resourceFound);
+         }
+         if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource index lookup returned found=%d\n", resourceFound);
++        if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource index lookup returned found=%d\n", resourceFound);
+ #endif
+     if (resourceFound) {
+ #if defined(__EMSCRIPTEN__)
+@@ -3019,6 +3041,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             idLib::Printf("[web-port image] hud_b resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
+         }
+         if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
++        if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
+ #endif
+         if (fs_debugResources.GetBool()) {
+             idLib::Printf("RES: loading file %s\n", rc.filename.c_str());
+@@ -3044,6 +3067,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+                 idLib::Printf("[web-port image] hud_b resource bytes read started length=%d\n", rc.length);
+             }
+             if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource bytes read started length=%d\n", rc.length);
++            if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource bytes read started length=%d\n", rc.length);
+ #endif
+             file->Read((void*)buf, rc.length);
+ #if defined(__EMSCRIPTEN__)
+@@ -3054,12 +3078,14 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+                 idLib::Printf("[web-port image] hud_b resource bytes read returned\n");
+             }
+             if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource bytes read returned\n");
++            if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource bytes read returned\n");
+ #endif
+ 
+             if (buf == resourceBufferPtr) {
+                 file->SetResourceBuffer(buf);
+ #if defined(__EMSCRIPTEN__)
+                 if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource returned shared buffer\n");
++                if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource returned shared buffer\n");
+ #endif
+                 return file;
+             } else {
+@@ -3069,6 +3095,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+                     delete file;
+ #if defined(__EMSCRIPTEN__)
+                     if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource returned memory file bytes=%d\n", rc.length);
++                    if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource returned memory file bytes=%d\n", rc.length);
+ #endif
+                     return mfile;
+                 }
+@@ -3079,6 +3106,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             idLib::Printf("[web-port map] eye_left resource file returned streaming=%d\n", file != NULL);
+         }
+         if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource file returned streaming=%d\n", file != NULL);
++        if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource file returned streaming=%d\n", file != NULL);
+ #endif
+         return file;
+     }
+@@ -3088,6 +3116,7 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+         idLib::Printf("[web-port map] eye_left resource lookup returned missing\n");
+     }
+     if (traceFloorGrate) idLib::Printf("[web-port image] floorgrate resource lookup returned missing\n");
++    if (traceSkScan1) idLib::Printf("[web-port image] skscan1 resource lookup returned missing\n");
+ #endif
+     return NULL;
+ }
+diff --git a/neo/renderer/BinaryImage.cpp b/neo/renderer/BinaryImage.cpp
+index 3e644b6..e8f4579 100644
+--- a/neo/renderer/BinaryImage.cpp
++++ b/neo/renderer/BinaryImage.cpp
+@@ -356,26 +356,32 @@ ID_TIME_T idBinaryImage::LoadFromGeneratedFile(ID_TIME_T sourceFileTime)
+     MakeGeneratedFileName(binaryFileName);
+ #if defined(__EMSCRIPTEN__)
+     const bool webTraceFloorGrate = strstr(binaryFileName.c_str(), "textures/washroom/rffloorgrate01") != NULL;
++    const bool webTraceSkScan1 = strstr(binaryFileName.c_str(), "guis/assets/medical/skscan1") != NULL;
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image open started path=%s\n", binaryFileName.c_str());
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image open started path=%s\n", binaryFileName.c_str());
+ #endif
+     idFileLocal bFile = fileSystem->OpenFileRead(binaryFileName);
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image open returned found=%d bytes=%d\n", bFile != NULL, bFile != NULL ? bFile->Length() : 0);
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image open returned found=%d bytes=%d\n", bFile != NULL, bFile != NULL ? bFile->Length() : 0);
+ #endif
+     if (bFile == NULL) {
+         return FILE_NOT_FOUND_TIMESTAMP;
+     }
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image parse started\n");
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image parse started\n");
+ #endif
+     if (LoadFromGeneratedFile(bFile, sourceFileTime)) {
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image parse returned valid=1\n");
++        if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image parse returned valid=1\n");
+ #endif
+         return bFile->Timestamp();
+     }
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image parse returned valid=0\n");
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image parse returned valid=0\n");
+ #endif
+     return FILE_NOT_FOUND_TIMESTAMP;
+ }
+diff --git a/neo/renderer/Image_load.cpp b/neo/renderer/Image_load.cpp
+index 982873f..7cb0495 100644
+--- a/neo/renderer/Image_load.cpp
++++ b/neo/renderer/Image_load.cpp
+@@ -291,6 +291,7 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     const bool webTraceEyeLeft = idStr::Icmp(GetName(), "guis/assets/mainmenu/eye_left") == 0;
+     const bool webTraceHudB = idStr::Icmp(GetName(), "guis/assets/hud/controller/xb360/b") == 0;
+     const bool webTraceFloorGrate = idStr::Icmp(GetName(), "textures/washroom/rffloorgrate01") == 0;
++    const bool webTraceSkScan1 = idStr::Icmp(GetName(), "guis/assets/medical/skscan1") == 0;
+     if (webTraceEyeLeft) {
+         common->Printf("[web-port trace] eye_left ActuallyLoadImage started\n");
+     }
+@@ -298,6 +299,7 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+         common->Printf("[web-port trace] hud_b ActuallyLoadImage started\n");
+     }
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate ActuallyLoadImage enter fromBackEnd=%d\n", fromBackEnd ? 1 : 0);
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 ActuallyLoadImage enter fromBackEnd=%d\n", fromBackEnd ? 1 : 0);
+ #endif
+ 
+     // this is the ONLY place generatorFunction will ever be called
+@@ -329,12 +331,14 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read started\n");
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source metadata read started\n");
+             if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source metadata read started\n");
++            if (webTraceSkScan1) common->Printf("[web-port image] skscan1 source metadata read started\n");
+ #endif
+             R_LoadImageProgram(GetName(), NULL, NULL, NULL, &sourceFileTime, &usage);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read returned\n");
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source metadata read returned\n");
+             if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source metadata read returned\n");
++            if (webTraceSkScan1) common->Printf("[web-port image] skscan1 source metadata read returned\n");
+ #endif
+         }
+     }
+@@ -368,12 +372,14 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read started\n");
+     if (webTraceHudB) common->Printf("[web-port trace] hud_b generated cache read started generated=%s\n", generatedName.c_str());
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache read started\n");
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 generated cache read started generated=%s\n", generatedName.c_str());
+ #endif
+     binaryFileTime = im.LoadFromGeneratedFile(sourceFileTime);
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
+     if (webTraceHudB) common->Printf("[web-port trace] hud_b generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
+ #endif
+ 
+     // BFHACK, do not want to tweak on buildgame so catch these images here
+@@ -458,12 +464,14 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read started\n");
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source pixels read started name=%s\n", GetName());
+             if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source pixels read started name=%s\n", GetName());
++            if (webTraceSkScan1) common->Printf("[web-port image] skscan1 source pixels read started name=%s\n", GetName());
+ #endif
+             R_LoadImageProgram(GetName(), &pic, &width, &height, &sourceFileTime, &usage);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
+             if (webTraceHudB) common->Printf("[web-port trace] hud_b source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
+             if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
++            if (webTraceSkScan1) common->Printf("[web-port image] skscan1 source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
+ #endif
+ 
+             if (pic == NULL) {
+@@ -492,11 +500,13 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left binary image build started width=%d height=%d\n", width, height);
+             if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image build started width=%d height=%d\n", width, height);
++            if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image build started width=%d height=%d\n", width, height);
+ #endif
+             im.Load2DFromMemory(opts.width, opts.height, pic, opts.numLevels, opts.format, opts.colorFormat, opts.gammaMips);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left binary image build returned\n");
+             if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate binary image build returned\n");
++            if (webTraceSkScan1) common->Printf("[web-port image] skscan1 binary image build returned\n");
+ #endif
+ 
+             Mem_Free(pic);
+@@ -504,20 +514,24 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache write started\n");
+         if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache write started\n");
++        if (webTraceSkScan1) common->Printf("[web-port image] skscan1 generated cache write started\n");
+ #endif
+         binaryFileTime = im.WriteGeneratedFile(sourceFileTime);
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache write returned\n");
+         if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate generated cache write returned\n");
++        if (webTraceSkScan1) common->Printf("[web-port image] skscan1 generated cache write returned\n");
+ #endif
+     }
+ 
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU image allocation started\n");
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 GPU image allocation started\n");
+ #endif
+     AllocImage();
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU image allocation returned\n");
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 GPU image allocation returned\n");
+ #endif
+ 
+     for (int i = 0; i < im.NumImages(); i++) {
+@@ -526,16 +540,19 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left GPU upload started level=%d size=%dx%d\n", img.level, img.width, img.height);
+         if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU upload started level=%d size=%dx%d\n", img.level, img.width, img.height);
++        if (webTraceSkScan1) common->Printf("[web-port image] skscan1 GPU upload started level=%d size=%dx%d\n", img.level, img.width, img.height);
+ #endif
+         SubImageUpload(img.level, 0, 0, img.destZ, img.width, img.height, data);
+ #if defined(__EMSCRIPTEN__)
+         if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left GPU upload returned level=%d\n", img.level);
+         if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate GPU upload returned level=%d\n", img.level);
++        if (webTraceSkScan1) common->Printf("[web-port image] skscan1 GPU upload returned level=%d\n", img.level);
+ #endif
+     }
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left ActuallyLoadImage returned\n");
+     if (webTraceFloorGrate) common->Printf("[web-port image] floorgrate ActuallyLoadImage returned\n");
++    if (webTraceSkScan1) common->Printf("[web-port image] skscan1 ActuallyLoadImage returned\n");
+ #endif
+ }
+ 

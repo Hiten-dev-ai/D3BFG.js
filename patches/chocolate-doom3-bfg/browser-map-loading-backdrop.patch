@@ -1,0 +1,70 @@
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -44,2 +44,21 @@
+ });
++EM_ASYNC_JS(int, WebStageMapLoadingImage, (const char* mapName), {
++  try {
++    if (!Module['stageMapLoadingImage']) throw new Error('Map loading image staging is unavailable in the engine worker.');
++    return (await Module['stageMapLoadingImage'](UTF8ToString(mapName))) ? 1 : 0;
++  } catch (error) {
++    err('[DOOM 3 BFG Web] Map loading image staging failed: ' + error);
++    return 0;
++  }
++});
++EM_ASYNC_JS(int, WebReleaseMapLoadingImage, (const char* mapName), {
++  try {
++    if (!Module['releaseMapLoadingImage']) throw new Error('Map loading image release is unavailable in the engine worker.');
++    await Module['releaseMapLoadingImage'](UTF8ToString(mapName));
++    return 1;
++  } catch (error) {
++    err('[DOOM 3 BFG Web] Map loading image release failed: ' + error);
++    return 0;
++  }
++});
+ EM_ASYNC_JS(int, WebReleaseMapResourcesExcept, (const char* mapName), {
+@@ -515,6 +515,8 @@
+     insideExecuteMapChange = true;
+ 
+ #ifdef __EMSCRIPTEN__
++    idStr webPreviousMapName = currentMapName;
++    webPreviousMapName.StripFileExtension();
+     currentMapName = matchParameters.mapName;
+     currentMapName.StripFileExtension();
+     common->Printf("[web-port map] ExecuteMapChange reached map=%s\n", currentMapName.c_str());
+@@ -534,12 +536,12 @@
+     ClearWipe();
+     UpdateScreen(false);
+     common->Printf("[web-port map] native loading screen presented before archive staging\n");
+-    if (webLoadingImageStaged && !WebReleaseMapLoadingImage(currentMapName.c_str())) {
+-        common->Warning("Could not release the staged loading image for '%s'.\n", currentMapName.c_str());
+-    }
+     const bool webMapStaged = WebStageMapResources(currentMapName.c_str());
+     common->Printf("[web-port map] archive staging returned %s map=%s\n", webMapStaged ? "success" : "failure", currentMapName.c_str());
+     if (!webMapStaged) {
++        if (webLoadingImageStaged) {
++            WebReleaseMapLoadingImage(currentMapName.c_str());
++        }
+         delete loadGUI;
+         loadGUI = NULL;
+         insideExecuteMapChange = false;
+@@ -614,6 +616,10 @@
+     common->Printf("%6d msec to unload map\n", ms);
+ #ifdef __EMSCRIPTEN__
+     common->Printf("[web-port map] UnloadMap returned elapsed=%d ms\n", ms);
++    if (webPreviousMapName.Length() > 0 && webPreviousMapName.Icmp(currentMapName) != 0 &&
++        !WebReleaseMapLoadingImage(webPreviousMapName.c_str())) {
++        common->Warning("Could not release the previous loading image for '%s'.\n", webPreviousMapName.c_str());
++    }
+     if (!WebReleaseMapResourcesExcept(currentMapName.c_str())) {
+         common->Warning("Could not release prior map archives after unloading '%s'.\n", currentMapName.c_str());
+     }
+@@ -647,6 +653,9 @@
+     LoadLoadingGui(currentMapName, hellMap);
+ #ifdef __EMSCRIPTEN__
+     common->Printf("[web-port map] LoadLoadingGui returned map=%s\n", currentMapName.c_str());
++    if (webLoadingImageStaged && !WebReleaseMapLoadingImage(currentMapName.c_str())) {
++        common->Warning("Could not release the staged loading image for '%s'.\n", currentMapName.c_str());
++    }
+ #endif
+ 
+     // Stop rendering the wipe

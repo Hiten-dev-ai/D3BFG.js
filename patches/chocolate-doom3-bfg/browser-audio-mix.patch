@@ -1,0 +1,34 @@
+﻿diff --git a/neo/sound/snd_emitter.cpp b/neo/sound/snd_emitter.cpp
+index 44962fc..2547254 100644
+--- a/neo/sound/snd_emitter.cpp
++++ b/neo/sound/snd_emitter.cpp
+@@ -27,6 +27,11 @@ If you have questions concerning this license or the applicable additional terms
+ */
+ 
+ #pragma hdrstop
++
++#ifdef __EMSCRIPTEN__
++idCVar s_musicVolume("s_musicVolume", "1", CVAR_SOUND | CVAR_FLOAT | CVAR_ARCHIVE, "music mix gain", 0.0f, 1.0f);
++idCVar s_gameVolume("s_gameVolume", "1", CVAR_SOUND | CVAR_FLOAT | CVAR_ARCHIVE, "gameplay and dialogue mix gain", 0.0f, 1.0f);
++#endif
+ #include "precompiled.h"
+ 
+ #include "snd_local.h"
+@@ -249,6 +254,17 @@ void idSoundChannel::UpdateVolume(int currentTime)
+         newVolumeDB += soundWorld->soundClassFade[parms.soundClass].GetVolume(currentTime);
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    // Keep the original samples, spatialization and master gain. Split the
++    // channel mix using the native sound shader's music classification.
++    const float mixGain = (parms.soundShaderFlags & SSF_MUSIC) != 0
++        ? s_musicVolume.GetFloat() : s_gameVolume.GetFloat();
++    if (mixGain <= 0.0f) {
++        return;
++    }
++    newVolumeDB += LinearToDB(mixGain);
++#endif
++
+     bool global = (parms.soundShaderFlags & SSF_GLOBAL) != 0;
+ 
+     // attenuation

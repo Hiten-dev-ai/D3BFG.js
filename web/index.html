@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/svg+xml" href="/brand.svg" />
+    <title>D3BFG.js</title>
+  </head>
+  <body>
+    <!-- Engine Canvas -->
+    <canvas id="canvas" tabindex="0" aria-label="D3BFG.js"></canvas>
+
+    <!-- Custom Loading Screen Overlay -->
+    <div id="loading-overlay" role="region" aria-label="Loading assets">
+      <img class="loader-art" src="/brand.svg" width="960" height="540" alt="" aria-hidden="true" />
+      <div class="loader-container">
+        <div class="loader-brand"><h1 class="loader-title">D3BFG.js</h1></div>
+        <p class="loader-port">D3BFG.js</p>
+        <div class="progress-track" role="progressbar" aria-label="Preparing D3BFG.js" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="loading-progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="loading-status" class="loader-status" role="status">Preparing game files...</p>
+        <p id="loading-detail" class="loader-detail">Checking cached assets</p>
+        <form id="access-form" class="access-form" hidden>
+          <label for="access-login">Account name or email</label>
+          <input id="access-login" name="login" type="text" autocomplete="username" placeholder="Name or email" maxlength="120" required />
+          <label for="access-password">Password</label>
+          <input id="access-password" name="password" type="password" autocomplete="current-password" placeholder="Password" maxlength="256" required />
+          <button type="submit">Sign in</button>
+          <p id="access-error" class="access-error" role="alert"></p>
+        </form>
+        <button id="play-again" class="play-again" type="button" hidden>Play again</button>
+        <div id="loading-error" class="loader-error" role="alert" style="display: none;"></div>
+      </div>
+    </div>
+
+    <section id="fullscreen-gate" class="fullscreen-gate" aria-label="Resume game" hidden>
+      <div class="fullscreen-prompt">
+        <h2>D3BFG.js</h2>
+        <p id="fullscreen-message">Your browser needs a click to enter full screen.</p>
+        <button id="play-game" class="play-again" type="button" hidden>Enter full screen</button>
+        <button id="fullscreen-enter" type="button">Enter full screen</button>
+        <button id="fullscreen-windowed" type="button">Continue windowed</button>
+      </div>
+    </section>
+
+    <button id="account-trigger" class="account-trigger" type="button" aria-label="Account" aria-haspopup="dialog" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c.7-4 3.3-6 7.5-6s6.8 2 7.5 6"/></svg>
+      <span id="account-trigger-name">Account</span>
+    </button>
+    <dialog id="account-dialog" class="account-dialog" aria-labelledby="account-dialog-title">
+      <div id="account-dialog-content"></div>
+    </dialog>
+    <dialog id="account-confirm" class="account-dialog account-confirm" aria-labelledby="account-confirm-title">
+      <div id="account-confirm-content"></div>
+    </dialog>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

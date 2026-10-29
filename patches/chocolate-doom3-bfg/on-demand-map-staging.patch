@@ -1,0 +1,457 @@
+diff --git a/neo/framework/Common_load.cpp b/neo/framework/Common_load.cpp
+index 984118e..68c0b73 100644
+--- a/neo/framework/Common_load.cpp
++++ b/neo/framework/Common_load.cpp
+@@ -28,6 +28,19 @@ If you have questions concerning this license or the applicable additional terms
+ 
+ #include "precompiled.h"
+ #pragma hdrstop
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++EM_ASYNC_JS(int, WebStageMapResources, (const char* mapName), {
++  try {
++    if (!Module['stageMapResources']) throw new Error('Map staging is unavailable in the engine worker.');
++    await Module['stageMapResources'](UTF8ToString(mapName));
++    return 1;
++  } catch (error) {
++    err('[DOOM 3 BFG Web] Map archive staging failed: ' + error);
++    return 0;
++  }
++});
++#endif
+ 
+ #include "Common_local.h"
+ #include "../sys/sys_lobby_backend.h"
+@@ -57,11 +70,25 @@ void idCommonLocal::StartWipe(const char* _wipeMaterial, bool hold)
+ {
+     console->Close();
+ 
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] StartWipe Draw started\n");
++#endif
+     Draw();
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] StartWipe Draw returned\n");
++    common->Printf("[web-port map] StartWipe capture started\n");
++#endif
+ 
+     renderSystem->CaptureRenderToImage("_currentRender");
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] StartWipe capture returned\n");
++    common->Printf("[web-port map] StartWipe material lookup started\n");
++#endif
+ 
+     wipeMaterial = declManager->FindMaterial(_wipeMaterial, false);
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] StartWipe material lookup returned\n");
++#endif
+ 
+     wipeStartTime = Sys_Milliseconds();
+     wipeStopTime = wipeStartTime + SEC2MS(com_wipeSeconds.GetFloat());
+@@ -75,14 +102,38 @@ idCommonLocal::CompleteWipe
+ */
+ void idCommonLocal::CompleteWipe()
+ {
++#ifdef __EMSCRIPTEN__
++    const int webWipeStart = Sys_Milliseconds();
++    int webWipeIterations = 0;
++    common->Printf("[web-port map] CompleteWipe started remaining=%d ms\n", wipeStopTime - webWipeStart);
++#endif
+     while (Sys_Milliseconds() < wipeStopTime) {
+         BusyWait();
++#ifdef __EMSCRIPTEN__
++        webWipeIterations++;
++        if (webWipeIterations == 1 || webWipeIterations % 25 == 0) {
++            common->Printf("[web-port map] CompleteWipe BusyWait returned iterations=%d elapsed=%d ms\n",
++                webWipeIterations, Sys_Milliseconds() - webWipeStart);
++        }
++#endif
+         Sys_Sleep(10);
++#ifdef __EMSCRIPTEN__
++        if (webWipeIterations == 1) {
++            common->Printf("[web-port map] CompleteWipe first sleep returned\n");
++        }
++#endif
+     }
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] CompleteWipe loop returned iterations=%d elapsed=%d ms\n",
++        webWipeIterations, Sys_Milliseconds() - webWipeStart);
++#endif
+ 
+     // ensure it is completely faded out
+     wipeStopTime = Sys_Milliseconds();
+     BusyWait();
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] CompleteWipe final BusyWait returned\n");
++#endif
+ }
+ 
+ /*
+@@ -105,6 +156,10 @@ idCommonLocal::StartNewGame
+ */
+ void idCommonLocal::StartNewGame(const char* mapName, bool devmap, int gameMode)
+ {
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port session] StartNewGame map=%s devmap=%d mode=%d\n", mapName, devmap ? 1 : 0, gameMode);
++#endif
++
+     if (session->GetSignInManager().GetMasterLocalUser() == NULL) {
+         // For development make sure a controller is registered
+         // Can't just register the local user because it will be removed because of it's persistent state
+@@ -221,14 +276,38 @@ idCommonLocal::LoadLoadingGui
+ void idCommonLocal::LoadLoadingGui(const char* mapName, bool& hellMap)
+ {
+ 
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui entered map=%s demo=%d\n", mapName, g_demoMode.GetBool() ? 1 : 0);
++#endif
+     defaultLoadscreen = false;
+-    loadGUI = new idSWF("loading/default", NULL);
++    if (loadGUI == NULL) {
++        loadGUI = new idSWF("loading/default", NULL);
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui SWF constructed\n");
++#endif
++    } else {
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui reusing SWF\n");
++#endif
++    }
+ 
+     if (g_demoMode.GetBool()) {
+         hellMap = false;
+         if (loadGUI != NULL) {
++#ifdef __EMSCRIPTEN__
++            common->Printf("[web-port map] LoadLoadingGui demo material lookup started\n");
++#endif
+             const idMaterial* defaultMat = declManager->FindMaterial("guis/assets/loadscreens/default");
++#ifdef __EMSCRIPTEN__
++            common->Printf("[web-port map] LoadLoadingGui demo material lookup returned\n");
++#endif
++#ifdef __EMSCRIPTEN__
++            common->Printf("[web-port map] LoadLoadingGui demo images started\n");
++#endif
+             renderSystem->LoadLevelImages();
++#ifdef __EMSCRIPTEN__
++            common->Printf("[web-port map] LoadLoadingGui demo images returned\n");
++#endif
+ 
+             loadGUI->Activate(true);
+             idSWFSpriteInstance* bgImg = loadGUI->GetRootObject().GetSprite("bgImage");
+@@ -248,13 +327,40 @@ void idCommonLocal::LoadLoadingGui(const char* mapName, bool& hellMap)
+     // use default load screen for demo
+     idStrStatic<MAX_OSPATH> matName = "guis/assets/loadscreens/";
+     matName.Append(stripped);
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui map material lookup started material=%s\n", matName.c_str());
++#endif
+     const idMaterial* mat = declManager->FindMaterial(matName);
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui map material lookup returned\n");
++    common->Printf("[web-port map] LoadLoadingGui images started\n");
++#endif
+ 
+     renderSystem->LoadLevelImages();
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui images returned\n");
++#endif
+ 
+-    if (mat->GetImageWidth() < 32) {
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui image width lookup started\n");
++#endif
++    const int mapLoadImageWidth = mat->GetImageWidth();
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui image width lookup returned width=%d\n", mapLoadImageWidth);
++#endif
++    if (mapLoadImageWidth < 32) {
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui fallback material lookup started\n");
++#endif
+         mat = declManager->FindMaterial("guis/assets/loadscreens/default");
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui fallback material lookup returned\n");
++        common->Printf("[web-port map] LoadLoadingGui fallback images started\n");
++#endif
+         renderSystem->LoadLevelImages();
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui fallback images returned\n");
++#endif
+     }
+ 
+     loadTipList.SetNum(loadTipList.Max());
+@@ -264,6 +370,9 @@ void idCommonLocal::LoadLoadingGui(const char* mapName, bool& hellMap)
+ 
+     if (loadGUI != NULL) {
+         loadGUI->Activate(true);
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui SWF activated\n");
++#endif
+         nextLoadTip = Sys_Milliseconds() + LOAD_TIP_CHANGE_INTERVAL;
+ 
+         idSWFSpriteInstance* bgImg = loadGUI->GetRootObject().GetSprite("bgImage");
+@@ -273,7 +382,13 @@ void idCommonLocal::LoadLoadingGui(const char* mapName, bool& hellMap)
+ 
+         idSWFSpriteInstance* overlay = loadGUI->GetRootObject().GetSprite("overlay");
+ 
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui map definition lookup started\n");
++#endif
+         const idDeclEntityDef* mapDef = static_cast<const idDeclEntityDef*>(declManager->FindType(DECL_MAPDEF, mapName, false));
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] LoadLoadingGui map definition lookup returned found=%d\n", mapDef != NULL ? 1 : 0);
++#endif
+         if (mapDef != NULL) {
+             isHellMap = mapDef->dict.GetBool("hellMap", false);
+ 
+@@ -288,6 +403,9 @@ void idCommonLocal::LoadLoadingGui(const char* mapName, bool& hellMap)
+ 
+             txtVal = loadGUI->GetRootObject().GetNestedText("txtRegLoad");
+             displayName = idLocalization::GetString(mapDef->dict.GetString("name", mapName));
++#ifdef __EMSCRIPTEN__
++            common->Printf("[web-port map] LoadLoadingGui localized map name\n");
++#endif
+ 
+             if (txtVal != NULL) {
+                 txtVal->SetText("#str_00408");
+@@ -367,6 +485,28 @@ void idCommonLocal::ExecuteMapChange()
+ 
+     insideExecuteMapChange = true;
+ 
++#ifdef __EMSCRIPTEN__
++    currentMapName = matchParameters.mapName;
++    currentMapName.StripFileExtension();
++    common->Printf("[web-port map] ExecuteMapChange reached map=%s\n", currentMapName.c_str());
++    // Keep the level transition inside the game's native loading UI while the
++    // on-demand map archive is downloaded and staged in OPFS.
++    bool webStagingLoadScreenHellMap = false;
++    LoadLoadingGui(currentMapName, webStagingLoadScreenHellMap);
++    UpdateScreen(false);
++    common->Printf("[web-port map] native loading screen presented before archive staging\n");
++    const bool webMapStaged = WebStageMapResources(currentMapName.c_str());
++    common->Printf("[web-port map] archive staging returned %s map=%s\n", webMapStaged ? "success" : "failure", currentMapName.c_str());
++    if (!webMapStaged) {
++        delete loadGUI;
++        loadGUI = NULL;
++        insideExecuteMapChange = false;
++        common->Warning("Could not stage map archives for '%s'; returning to the title screen.\n", currentMapName.c_str());
++        session->QuitMatchToTitle();
++        return;
++    }
++#endif
++
+     common->Printf("--------- Execute Map Change ---------\n");
+     common->Printf("Map: %s\n", matchParameters.mapName.c_str());
+ 
+@@ -403,11 +543,17 @@ void idCommonLocal::ExecuteMapChange()
+     fullMapName += currentMapName;
+     fullMapName.SetFileExtension("map");
+ 
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] BeginLevelLoad started map=%s\n", currentMapName.c_str());
++#endif
+     if (mapSpawnData.savegameFile) {
+         fileSystem->BeginLevelLoad(currentMapName, NULL, 0);
+     } else {
+         fileSystem->BeginLevelLoad(currentMapName, saveFile.GetDataPtr(), saveFile.GetAllocated());
+     }
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] BeginLevelLoad returned map=%s\n", currentMapName.c_str());
++#endif
+ 
+     // capture the current screen and start a wipe
+     // immediately complete the wipe to fade out the level transition
+@@ -417,26 +563,45 @@ void idCommonLocal::ExecuteMapChange()
+ 
+     int sm = Sys_Milliseconds();
+     // shut down the existing game if it is running
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] UnloadMap started\n");
++#endif
+     UnloadMap();
+     int ms = Sys_Milliseconds() - sm;
+     common->Printf("%6d msec to unload map\n", ms);
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] UnloadMap returned elapsed=%d ms\n", ms);
++#endif
+ 
+     // Free media from previous level and
+     // note which media we are going to need to load
+     sm = Sys_Milliseconds();
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] asset managers BeginLevelLoad started\n");
++#endif
+     renderSystem->BeginLevelLoad();
+     soundSystem->BeginLevelLoad();
+     declManager->BeginLevelLoad();
+     uiManager->BeginLevelLoad();
+     ms = Sys_Milliseconds() - sm;
+     common->Printf("%6d msec to free assets\n", ms);
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] asset managers BeginLevelLoad returned elapsed=%d ms\n", ms);
++#endif
+ 
+     // Sys_DumpMemory( true );
+ 
+     // load / program a gui to stay up on the screen while loading
+     // set the loading gui that we will wipe to
+     bool hellMap = false;
++    // Refresh the already-visible native loading SWF after the map archives mount.
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui started map=%s\n", currentMapName.c_str());
++#endif
+     LoadLoadingGui(currentMapName, hellMap);
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] LoadLoadingGui returned map=%s\n", currentMapName.c_str());
++#endif
+ 
+     // Stop rendering the wipe
+     ClearWipe();
+@@ -447,10 +612,28 @@ void idCommonLocal::ExecuteMapChange()
+         manifestName.Replace("/mp/", "/");
+         manifestName += ".preload";
+         idPreloadManifest manifest;
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] preload manifest load started file=%s\n", manifestName.c_str());
++#endif
+         manifest.LoadManifest(manifestName);
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] preload manifest load returned file=%s\n", manifestName.c_str());
++        common->Printf("[web-port map] render preload started\n");
++#endif
+         renderSystem->Preload(manifest, currentMapName);
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] render preload returned\n");
++        common->Printf("[web-port map] sound preload started\n");
++#endif
+         soundSystem->Preload(manifest);
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] sound preload returned\n");
++        common->Printf("[web-port map] game preload started\n");
++#endif
+         game->Preload(manifest);
++#ifdef __EMSCRIPTEN__
++        common->Printf("[web-port map] game preload returned\n");
++#endif
+     }
+ 
+     if (common->IsMultiplayer()) {
+@@ -473,15 +656,24 @@ void idCommonLocal::ExecuteMapChange()
+     Sys_GrabMouseCursor(false);
+ 
+     // let the renderSystem load all the geometry
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] renderWorld InitFromMap started map=%s\n", fullMapName.c_str());
++#endif
+     if (!renderWorld->InitFromMap(fullMapName)) {
+         common->Error("couldn't load %s", fullMapName.c_str());
+     }
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] renderWorld InitFromMap returned map=%s\n", fullMapName.c_str());
++#endif
+ 
+     // for the synchronous networking we needed to roll the angles over from
+     // level to level, but now we can just clear everything
+     usercmdGen->InitForNewMap();
+ 
+     // load and spawn all other entities ( from a savegame possibly )
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] game initialization started map=%s\n", fullMapName.c_str());
++#endif
+     if (mapSpawnData.savegameFile) {
+         if (!game->InitFromSaveGame(fullMapName, renderWorld, soundWorld, mapSpawnData.savegameFile, mapSpawnData.stringTableFile, mapSpawnData.savegameVersion)) {
+             // If the loadgame failed, end the session, which will force us to go back to the main menu
+@@ -497,6 +689,9 @@ void idCommonLocal::ExecuteMapChange()
+         game->SetServerInfo(matchParameters.serverInfo);
+         game->InitFromNewMap(fullMapName, renderWorld, soundWorld, matchParameters.gameMode, Sys_Milliseconds());
+     }
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] game initialization returned map=%s\n", fullMapName.c_str());
++#endif
+ 
+     game->Shell_CreateMenu(true);
+ 
+diff --git a/neo/framework/FileSystem.cpp b/neo/framework/FileSystem.cpp
+index 310bae2..63f7429 100644
+--- a/neo/framework/FileSystem.cpp
++++ b/neo/framework/FileSystem.cpp
+@@ -2540,7 +2540,16 @@ int idFileSystemLocal::AddResourceFile(const char* resourceFileName)
+ {
+     idStrStatic<MAX_OSPATH> resourceFile = va("maps/%s", resourceFileName);
+     idResourceContainer* rc = new idResourceContainer();
+-    if (rc->Init(resourceFile, resourceFiles.Num())) {
++#ifdef __EMSCRIPTEN__
++    const int webResourceInitStart = Sys_Milliseconds();
++    common->Printf("[web-port map] AddResourceFile init started file=%s slot=%d\n", resourceFile.c_str(), resourceFiles.Num());
++#endif
++    const bool resourceInitSucceeded = rc->Init(resourceFile, resourceFiles.Num());
++#ifdef __EMSCRIPTEN__
++    common->Printf("[web-port map] AddResourceFile init returned file=%s result=%s elapsed=%d ms\n",
++        resourceFile.c_str(), resourceInitSucceeded ? "success" : "failure", Sys_Milliseconds() - webResourceInitStart);
++#endif
++    if (resourceInitSucceeded) {
+         resourceFiles.Append(rc);
+         common->Printf("Loaded resource file %s\n", resourceFile.c_str());
+         return resourceFiles.Num() - 1;
+diff --git a/neo/framework/File_Resource.cpp b/neo/framework/File_Resource.cpp
+index 4e23bb7..9c4b739 100644
+--- a/neo/framework/File_Resource.cpp
++++ b/neo/framework/File_Resource.cpp
+@@ -55,6 +55,10 @@ idResourceContainer::Init
+ */
+ bool idResourceContainer::Init(const char* _fileName, uint8 containerIndex)
+ {
++#ifdef __EMSCRIPTEN__
++    const int webResourceOpenStart = Sys_Milliseconds();
++    idLib::Printf("[web-port map] resource archive open started file=%s\n", _fileName);
++#endif
+ 
+     if (idStr::Icmp(_fileName, "_ordered.resources") == 0) {
+         resourceFile = fileSystem->OpenFileReadMemory(_fileName);
+@@ -63,9 +67,17 @@ bool idResourceContainer::Init(const char* _fileName, uint8 containerIndex)
+     }
+ 
+     if (resourceFile == NULL) {
++#ifdef __EMSCRIPTEN__
++        idLib::Printf("[web-port map] resource archive open failed file=%s elapsed=%d ms\n",
++            _fileName, Sys_Milliseconds() - webResourceOpenStart);
++#endif
+         idLib::Warning("Unable to open resource file %s", _fileName);
+         return false;
+     }
++#ifdef __EMSCRIPTEN__
++    idLib::Printf("[web-port map] resource archive open returned file=%s bytes=%d elapsed=%d ms\n",
++        _fileName, resourceFile->Length(), Sys_Milliseconds() - webResourceOpenStart);
++#endif
+ 
+     resourceFile->ReadBig(resourceMagic);
+     if (resourceMagic != RESOURCE_FILE_MAGIC) {
+@@ -79,7 +91,17 @@ bool idResourceContainer::Init(const char* _fileName, uint8 containerIndex)
+     // read this into a memory buffer with a single read
+     char* const buf = (char*)Mem_Alloc(tableLength, TAG_RESOURCE);
+     resourceFile->Seek(tableOffset, FS_SEEK_SET);
++#ifdef __EMSCRIPTEN__
++    const int webResourceIndexReadStart = Sys_Milliseconds();
++    idLib::Printf("[web-port map] resource index read started file=%s offset=%d bytes=%d\n",
++        _fileName, tableOffset, tableLength);
++#endif
+     resourceFile->Read(buf, tableLength);
++#ifdef __EMSCRIPTEN__
++    idLib::Printf("[web-port map] resource index read returned file=%s elapsed=%d ms\n",
++        _fileName, Sys_Milliseconds() - webResourceIndexReadStart);
++    const int webResourceIndexParseStart = Sys_Milliseconds();
++#endif
+     idFile_Memory memFile("resourceHeader", (const char*)buf, tableLength);
+ 
+     // Parse the resourceFile header, which includes every resource used
+@@ -110,6 +132,10 @@ bool idResourceContainer::Init(const char* _fileName, uint8 containerIndex)
+         }
+     }
+     Mem_Free(buf);
++#ifdef __EMSCRIPTEN__
++    idLib::Printf("[web-port map] resource index parsed file=%s entries=%d elapsed=%d ms\n",
++        _fileName, numFileResources, Sys_Milliseconds() - webResourceIndexParseStart);
++#endif
+ 
+     return true;
+ }

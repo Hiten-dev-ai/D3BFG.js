@@ -1,0 +1,17 @@
+diff --git a/neo/framework/Common.cpp b/neo/framework/Common.cpp
+index 907b82e..c76172a 100644
+--- a/neo/framework/Common.cpp
++++ b/neo/framework/Common.cpp
+@@ -1348,7 +1348,11 @@ void idCommonLocal::Init(int argc, const char* const* argv, const char* cmdline)
+ 
+         StartMenu(true);
+ 
+-
++#ifdef __EMSCRIPTEN__
++        // Browser initialization can take longer than the splash minimum.
++        // Start the visible-time interval only after startup work has finished.
++        legalStartTime = Sys_Milliseconds();
++#endif
+         while (Sys_Milliseconds() - legalStartTime < legalMinTime) {
+             RenderSplash();
+             Sys_GenerateEvents();

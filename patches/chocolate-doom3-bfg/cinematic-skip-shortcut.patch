@@ -1,0 +1,239 @@
+diff --git a/neo/d3xp/Game.h b/neo/d3xp/Game.h
+index ef23f9e..4ac6598 100644
+--- a/neo/d3xp/Game.h
++++ b/neo/d3xp/Game.h
+@@ -180,6 +180,8 @@ public:
+     virtual void Shell_UpdateClientCountdown(int countdown) = 0;
+     virtual void Shell_UpdateLeaderboard(const idLeaderboardCallback* callback) = 0;
+     virtual void Shell_SetGameComplete() = 0;
++    virtual bool SkipCinematicScene() = 0;
++    virtual bool CheckInCinematic() = 0;
+ };
+ 
+ extern idGame* game;
+diff --git a/neo/d3xp/Game_local.cpp b/neo/d3xp/Game_local.cpp
+index 0126f28..ce74383 100644
+--- a/neo/d3xp/Game_local.cpp
++++ b/neo/d3xp/Game_local.cpp
+@@ -229,7 +229,11 @@ void idGameLocal::Clear()
+     smokeParticles = NULL;
+     editEntities = NULL;
+     entityHash.Clear(1024, MAX_GENTITIES);
++    cinematicSkipTime = 0;
++    cinematicStopTime = 0;
++    cinematicMaxSkipTime = 0;
+     inCinematic = false;
++    skipCinematic = false;
+     framenum = 0;
+     previousTime = 0;
+     time = 0;
+@@ -987,7 +991,11 @@ void idGameLocal::LoadMap(const char* mapName, int randseed)
+ 
+     spawnArgs.Clear();
+ 
++    cinematicSkipTime = 0;
++    cinematicStopTime = 0;
++    cinematicMaxSkipTime = 0;
+     inCinematic = false;
++    skipCinematic = false;
+ 
+     clip.Init();
+ 
+@@ -1366,6 +1374,10 @@ bool idGameLocal::InitFromSaveGame(const char* mapName, idRenderWorld* renderWor
+     // FIXME: save smoke particles
+ 
+     savegame.ReadBool(inCinematic);
++    cinematicSkipTime = 0;
++    cinematicStopTime = 0;
++    cinematicMaxSkipTime = 0;
++    skipCinematic = false;
+ 
+     savegame.ReadInt((int&)gameType);
+ 
+@@ -1536,6 +1548,10 @@ void idGameLocal::MapShutdown()
+         camera = NULL;
+         inCinematic = false;
+     }
++    cinematicSkipTime = 0;
++    cinematicStopTime = 0;
++    cinematicMaxSkipTime = 0;
++    skipCinematic = false;
+ 
+     MapClear(true);
+ 
+@@ -2342,6 +2358,7 @@ void idGameLocal::RunFrame(idUserCmdMgr& cmdMgr, gameReturn_t& ret)
+             player->Think();
+         }
+     } else {
++        do {
+         // update the game time
+         framenum++;
+         fast.previousTime = FRAME_TO_MSEC(framenum - 1);
+@@ -2497,6 +2514,23 @@ void idGameLocal::RunFrame(idUserCmdMgr& cmdMgr, gameReturn_t& ret)
+         }
+ 
+         BuildReturnValue(ret);
++
++        if (ret.sessionCommand[0] != '\0') {
++            break;
++        }
++
++        if (skipCinematic && time > cinematicMaxSkipTime) {
++            Warning("Exceeded maximum cinematic skip length. Cinematic may be looping infinitely.");
++            skipCinematic = false;
++            soundSystem->SetMute(false);
++            break;
++        }
++        } while ((inCinematic || time < cinematicStopTime) && skipCinematic);
++
++        if (skipCinematic) {
++            soundSystem->SetMute(false);
++            skipCinematic = false;
++        }
+     }
+ 
+     // show any debug info for this frame
+@@ -4251,6 +4285,18 @@ void idGameLocal::SetCamera(idCamera* cam)
+     if (camera) {
+         inCinematic = true;
+ 
++        if (skipCinematic && camera->spawnArgs.GetBool("disconnect")) {
++            camera->spawnArgs.SetBool("disconnect", false);
++            cvarSystem->SetCVarFloat("r_znear", 3.0f);
++            cmdSystem->BufferCommandText(CMD_EXEC_APPEND, "disconnect\n");
++            skipCinematic = false;
++            return;
++        }
++
++        if (time > cinematicStopTime) {
++            cinematicSkipTime = time + CINEMATIC_SKIP_DELAY;
++        }
++
+         // set r_znear so that transitioning into/out of the player's head doesn't clip through the view
+         cvarSystem->SetCVarFloat("r_znear", 1.0f);
+ 
+@@ -4293,6 +4339,7 @@ void idGameLocal::SetCamera(idCamera* cam)
+ 
+     } else {
+         inCinematic = false;
++        cinematicStopTime = time + 1;
+ 
+         // restore r_znear
+         cvarSystem->SetCVarFloat("r_znear", 3.0f);
+@@ -4317,6 +4364,53 @@ idCamera* idGameLocal::GetCamera() const
+     return camera;
+ }
+ 
++/*
++================
++idGameLocal::SkipCinematic
++================
++*/
++bool idGameLocal::SkipCinematic()
++{
++    if (!inCinematic || time < cinematicSkipTime) {
++        return false;
++    }
++
++    if (camera) {
++        if (camera->spawnArgs.GetBool("disconnect")) {
++            camera->spawnArgs.SetBool("disconnect", false);
++            cvarSystem->SetCVarFloat("r_znear", 3.0f);
++            cmdSystem->BufferCommandText(CMD_EXEC_APPEND, "disconnect\n");
++            skipCinematic = false;
++            return false;
++        }
++        if (camera->spawnArgs.GetBool("instantSkip")) {
++            camera->Stop();
++            return false;
++        }
++    }
++
++    soundSystem->SetMute(true);
++    if (!skipCinematic) {
++        skipCinematic = true;
++        cinematicMaxSkipTime = time + SEC2MS(g_cinematicMaxSkipTime.GetFloat());
++        idSoundWorld* playingSoundWorld = soundSystem->GetPlayingSoundWorld();
++        if (playingSoundWorld) {
++            playingSoundWorld->Skip(cinematicMaxSkipTime);
++        }
++    }
++    return true;
++}
++
++bool idGameLocal::SkipCinematicScene()
++{
++    return SkipCinematic();
++}
++
++bool idGameLocal::CheckInCinematic()
++{
++    return inCinematic;
++}
++
+ /*
+ ======================
+ idGameLocal::SpreadLocations
+diff --git a/neo/d3xp/Game_local.h b/neo/d3xp/Game_local.h
+index 8f9ecc5..94d1a54 100644
+--- a/neo/d3xp/Game_local.h
++++ b/neo/d3xp/Game_local.h
+@@ -322,7 +322,11 @@ public:
+     idSmokeParticles* smokeParticles; // global smoke trails
+     idEditEntities* editEntities;     // in game editing
+ 
++    int cinematicSkipTime;
++    int cinematicStopTime;
++    int cinematicMaxSkipTime;
+     bool inCinematic; // game is playing cinematic (player controls frozen)
++    bool skipCinematic;
+ 
+     int framenum;
+     int time;         // in msec
+@@ -471,6 +475,9 @@ public:
+ 
+     void SetCamera(idCamera* cam);
+     idCamera* GetCamera() const;
++    bool SkipCinematic();
++    virtual bool SkipCinematicScene();
++    virtual bool CheckInCinematic();
+     void CalcFov(float base_fov, float& fov_x, float& fov_y) const;
+ 
+     void AddEntityToHash(const char* name, idEntity* ent);
+diff --git a/neo/framework/Common.cpp b/neo/framework/Common.cpp
+index 34911af..f51ba6a 100644
+--- a/neo/framework/Common.cpp
++++ b/neo/framework/Common.cpp
+@@ -1631,7 +1631,31 @@ idCommonLocal::ProcessEvent
+ */
+ bool idCommonLocal::ProcessEvent(const sysEvent_t* event)
+ {
+-    // hitting escape anywhere brings up the menu
++    // Consume both halves of a cinematic skip key so its release cannot
++    // become a gameplay action after the scene ends.
++    if (event->evType == SE_KEY &&
++        (event->evValue == K_ESCAPE || event->evValue == K_JOY9 || event->evValue == K_ENTER ||
++            event->evValue == K_KP_ENTER || event->evValue == K_SPACE)) {
++        static idList<int> consumedCinematicSkipKeys;
++        const bool keyDown = event->evValue2 != 0;
++        const int consumedIndex = consumedCinematicSkipKeys.FindIndex(event->evValue);
++
++        if (consumedIndex >= 0) {
++            if (!keyDown) {
++                consumedCinematicSkipKeys.RemoveIndex(consumedIndex);
++            }
++            return true;
++        }
++
++        if (game && game->CheckInCinematic()) {
++            if (keyDown) {
++                consumedCinematicSkipKeys.AddUnique(event->evValue);
++                game->SkipCinematicScene();
++            }
++            return true;
++        }
++    }
++
+     if (game && game->IsInGame()) {
+         if (event->evType == SE_KEY && event->evValue2 == 1 && (event->evValue == K_ESCAPE || event->evValue == K_JOY9)) {
+             if (!game->Shell_IsActive()) {

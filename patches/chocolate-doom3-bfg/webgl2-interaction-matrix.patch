@@ -1,0 +1,37 @@
+diff --git a/neo/renderer/tr_backend_draw.cpp b/neo/renderer/tr_backend_draw.cpp
+index a1164ab..6c7cd54 100644
+--- a/neo/renderer/tr_backend_draw.cpp
++++ b/neo/renderer/tr_backend_draw.cpp
+@@ -58,7 +58,7 @@ static void RB_WebPortTracePassPixels(const char* passName, int numDrawSurfs)
+ {
+ #if defined(__EMSCRIPTEN__)
+ 	static int tracedFrames = 0;
+-	if (!r_webPortPassTrace.GetBool() || tracedFrames >= 2 || numDrawSurfs < 60 || backEnd.viewDef == NULL || backEnd.viewDef->viewEntitys == NULL) {
++	if (!r_webPortPassTrace.GetBool() || tracedFrames >= 5 || numDrawSurfs < 60 || backEnd.viewDef == NULL || backEnd.viewDef->viewEntitys == NULL) {
+ 		return;
+ 	}
+ 
+@@ -1958,7 +1958,8 @@ static void RB_DrawInteractions()
+ 
+ #if defined(__EMSCRIPTEN__)
+     static int webPortInteractionTraceFrames = 0;
+-    const bool traceWebPortInteractions = r_webPortPassTrace.GetBool() && webPortInteractionTraceFrames < 1;
++    static int webPortAutoIsolationFrame = 0;
++    const bool traceWebPortInteractions = r_webPortPassTrace.GetBool() && webPortInteractionTraceFrames < 5;
+     int webPortLightCount = 0;
+     int webPortLightsWithInteractions = 0;
+     int webPortLocalInteractionCount = 0;
+@@ -1970,7 +1971,12 @@ static void RB_DrawInteractions()
+     GL_SelectTexture(0);
+ 
+     const bool bypassInteractionDepthStencil = r_webPortBypassInteractionDepthStencil.GetBool();
+-    const int interactionIsolationMode = r_webPortInteractionIsolationMode.GetInteger();
++    int interactionIsolationMode = r_webPortInteractionIsolationMode.GetInteger();
++#if defined(__EMSCRIPTEN__)
++    if (interactionIsolationMode < 0) {
++        interactionIsolationMode = webPortAutoIsolationFrame < 5 ? webPortAutoIsolationFrame++ : 0;
++    }
++#endif
+     const bool bypassInteractionDepth = bypassInteractionDepthStencil || interactionIsolationMode == 1;
+     const bool bypassInteractionStencil = bypassInteractionDepthStencil || interactionIsolationMode == 2;
+     const bool bypassInteractionDepthBounds = bypassInteractionDepthStencil || interactionIsolationMode == 3;

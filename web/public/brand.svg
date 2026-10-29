@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <defs><radialGradient id="g"><stop stop-color="#3c1210"/><stop offset="1" stop-color="#08090b"/></radialGradient></defs>
+  <path fill="url(#g)" d="M0 0h960v540H0z"/>
+  <g fill="none" stroke="#b3442d"><path d="M160 420V120l100-45h440l100 45v300l-100 45H260z"/><path opacity=".35" d="M190 405V135l80-35h420l80 35v270l-80 35H270z"/></g>
+  <text x="480" y="280" fill="#e8ded0" font-family="monospace" font-size="72" font-weight="bold" text-anchor="middle">D3BFG.js</text>
+  <text x="480" y="325" fill="#b78169" font-family="monospace" font-size="15" letter-spacing="5" text-anchor="middle">NATIVE ENGINE. BROWSER BATTLEGROUND.</text>
+</svg>

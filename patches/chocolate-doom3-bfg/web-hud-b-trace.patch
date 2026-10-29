@@ -1,0 +1,184 @@
+diff --git a/neo/renderer/Image_load.cpp b/neo/renderer/Image_load.cpp
+index dd367dd..0589928 100644
+--- a/neo/renderer/Image_load.cpp
++++ b/neo/renderer/Image_load.cpp
+@@ -289,8 +289,12 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     }
+ #if defined(__EMSCRIPTEN__)
+     const bool webTraceEyeLeft = idStr::Icmp(GetName(), "guis/assets/mainmenu/eye_left") == 0;
++    const bool webTraceHudB = idStr::Icmp(GetName(), "guis/assets/hud/controller/xb360/b") == 0;
+     if (webTraceEyeLeft) {
+         common->Printf("[web-port trace] eye_left ActuallyLoadImage started\n");
+     }
++    if (webTraceHudB) {
++        common->Printf("[web-port trace] hud_b ActuallyLoadImage started\n");
++    }
+ #endif
+ 
+@@ -316,10 +319,12 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             opts.textureType = TT_2D;
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read started\n");
++            if (webTraceHudB) common->Printf("[web-port trace] hud_b source metadata read started\n");
+ #endif
+             R_LoadImageProgram(GetName(), NULL, NULL, NULL, &sourceFileTime, &usage);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source metadata read returned\n");
++            if (webTraceHudB) common->Printf("[web-port trace] hud_b source metadata read returned\n");
+ #endif
+         }
+     }
+@@ -333,10 +338,12 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+     idBinaryImage im(generatedName);
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read started\n");
++    if (webTraceHudB) common->Printf("[web-port trace] hud_b generated cache read started generated=%s\n", generatedName.c_str());
+ #endif
+     binaryFileTime = im.LoadFromGeneratedFile(sourceFileTime);
+ #if defined(__EMSCRIPTEN__)
+     if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
++    if (webTraceHudB) common->Printf("[web-port trace] hud_b generated cache read returned found=%d\n", binaryFileTime != FILE_NOT_FOUND_TIMESTAMP ? 1 : 0);
+ #endif
+ 
+     // BFHACK, do not want to tweak on buildgame so catch these images here
+@@ -419,10 +426,12 @@ void idImage::ActuallyLoadImage(bool fromBackEnd)
+             // load the full specification, and perform any image program calculations
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read started\n");
++            if (webTraceHudB) common->Printf("[web-port trace] hud_b source pixels read started name=%s\n", GetName());
+ #endif
+             R_LoadImageProgram(GetName(), &pic, &width, &height, &sourceFileTime, &usage);
+ #if defined(__EMSCRIPTEN__)
+             if (webTraceEyeLeft) common->Printf("[web-port trace] eye_left source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
++            if (webTraceHudB) common->Printf("[web-port trace] hud_b source pixels read returned data=%d\n", pic != NULL ? 1 : 0);
+ #endif
+ 
+             if (pic == NULL) {
+diff --git a/neo/framework/FileSystem.cpp b/neo/framework/FileSystem.cpp
+index 24aeadc..0f251fc 100644
+--- a/neo/framework/FileSystem.cpp
++++ b/neo/framework/FileSystem.cpp
+@@ -1742,8 +1742,12 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+ 
+ #if defined(__EMSCRIPTEN__)
+     const bool traceEyeLeft = idStr::Icmp(relativePath, "guis/assets/mainmenu/eye_left.tga") == 0;
++    const bool traceHudB = idStr::Icmp(relativePath, "guis/assets/hud/controller/xb360/b.tga") == 0;
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left ReadFile started buffer=%d\n", buffer != NULL);
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b ReadFile started buffer=%d\n", buffer != NULL);
++    }
+ #endif
+ 
+@@ -1796,5 +1799,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left OpenFileRead started\n");
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b OpenFileRead started\n");
++    }
+ #endif
+     f = OpenFileRead(relativePath, (buffer != NULL));
+@@ -1803,5 +1808,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left OpenFileRead returned found=%d\n", f != NULL);
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b OpenFileRead returned found=%d\n", f != NULL);
++    }
+ #endif
+     if (f == NULL) {
+@@ -1845,5 +1852,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left ordinary file read started bytes=%d\n", len);
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b ordinary file read started bytes=%d\n", len);
++    }
+ #endif
+     f->Read(buf, len);
+@@ -1852,5 +1861,8 @@ int idFileSystemLocal::ReadFile(const char* relativePath, void** buffer, ID_TIME
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left ordinary file read returned\n");
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b ordinary file read returned\n");
++    }
+ #endif
+ 
+@@ -2932,8 +2943,12 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+ 
+ #if defined(__EMSCRIPTEN__)
+     const bool traceEyeLeft = fileName != NULL && idStr::Icmp(fileName, "guis/assets/mainmenu/eye_left.tga") == 0;
++    const bool traceHudB = fileName != NULL && idStr::Icmp(fileName, "guis/assets/hud/controller/xb360/b.tga") == 0;
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b resource lookup started memFile=%d containers=%d\n", memFile, resourceFiles.Num());
++    }
+ #endif
+ 
+@@ -2953,5 +2967,8 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+     if (traceEyeLeft) {
+         idLib::Printf("[web-port map] eye_left resource lookup returned found=%d\n", resourceFound);
+     }
++    if (traceHudB) {
++        idLib::Printf("[web-port image] hud_b resource lookup returned found=%d\n", resourceFound);
++    }
+ #endif
+     if (resourceFound) {
+@@ -2960,5 +2976,8 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+         if (traceEyeLeft) {
+             idLib::Printf("[web-port map] eye_left resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
+         }
++        if (traceHudB) {
++            idLib::Printf("[web-port image] hud_b resource entry container=%d offset=%d length=%d\n", rc.containerIndex, rc.offset, rc.length);
++        }
+ #endif
+         if (fs_debugResources.GetBool()) {
+@@ -2982,5 +3000,8 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             if (traceEyeLeft) {
+                 idLib::Printf("[web-port map] eye_left resource bytes read started length=%d\n", rc.length);
+             }
++            if (traceHudB) {
++                idLib::Printf("[web-port image] hud_b resource bytes read started length=%d\n", rc.length);
++            }
+ #endif
+             file->Read((void*)buf, rc.length);
+@@ -2989,5 +3009,8 @@ idFile* idFileSystemLocal::GetResourceFile(const char* fileName, bool memFile)
+             if (traceEyeLeft) {
+                 idLib::Printf("[web-port map] eye_left resource bytes read returned\n");
+             }
++            if (traceHudB) {
++                idLib::Printf("[web-port image] hud_b resource bytes read returned\n");
++            }
+ #endif
+ 
+diff --git a/neo/framework/File.cpp b/neo/framework/File.cpp
+index a5815b9..8ed02ea 100644
+--- a/neo/framework/File.cpp
++++ b/neo/framework/File.cpp
+@@ -1839,8 +1839,12 @@ int idFile_InnerResource::Read(void* buffer, int len)
+         } else {
+ #if defined(__EMSCRIPTEN__)
+             const bool traceEyeLeft = idStr::Icmp(name.c_str(), "guis/assets/mainmenu/eye_left.tga") == 0;
++            const bool traceHudB = idStr::Icmp(name.c_str(), "guis/assets/hud/controller/xb360/b.tga") == 0;
+             if (traceEyeLeft) {
+                 idLib::Printf("[web-port map] eye_left archive read started offset=%d length=%d archive=%s\n", offset + internalFilePos, len, resourceFile->GetName());
+             }
++            if (traceHudB) {
++                idLib::Printf("[web-port image] hud_b archive read started offset=%d length=%d archive=%s\n", offset + internalFilePos, len, resourceFile->GetName());
++            }
+ #endif
+             read = fileSystem->ReadFromBGL(resourceFile, buffer, offset + internalFilePos, len);
+@@ -1849,5 +1852,8 @@ int idFile_InnerResource::Read(void* buffer, int len)
+             if (traceEyeLeft) {
+                 idLib::Printf("[web-port map] eye_left archive read returned bytes=%d\n", read);
+             }
++            if (traceHudB) {
++                idLib::Printf("[web-port image] hud_b archive read returned bytes=%d\n", read);
++            }
+ #endif
+         }

@@ -1,0 +1,93 @@
+diff --git a/neo/sys/common/savegame.cpp b/neo/sys/common/savegame.cpp
+index d51b21d..2f8a284 100644
+--- a/neo/sys/common/savegame.cpp
++++ b/neo/sys/common/savegame.cpp
+@@ -90,6 +90,8 @@ int idSaveGameThread::Save()
+ {
+     idLocalUserWin* user = GetLocalUserFromSaveParms(data);
+     if (user == NULL) {
++        idLib::Warning("Savegame could not resolve a local user (inputDeviceId=%d, userId=%d).",
++            data.saveLoadParms->inputDeviceId, data.saveLoadParms->userId);
+         data.saveLoadParms->errorCode = SAVEGAME_E_INVALID_USER;
+         return -1;
+     }
+@@ -165,13 +167,14 @@ int idSaveGameThread::Save()
+         idStr fileName = saveFolder;
+         fileName.AppendPath(file->GetName());
+         idStr tempFileName = va("%s.temp", fileName.c_str());
++        idStr tempOSPath = fileSystem->RelativePathToOSPath(tempFileName.c_str(), "fs_savePath");
+ 
+         idFile* outputFile = fileSystem->OpenFileWrite(tempFileName, "fs_savePath");
+         if (outputFile == NULL) {
+ #ifdef _WIN32 // DG: unify windows and posix savegames => replace GetLastError with strerror(errno)
+-            idLib::Warning("[%s]: Couldn't open file for writing, %s. Error = %08x", __FUNCTION__, tempFileName.c_str(), GetLastError());
++            idLib::Warning("[%s]: Couldn't open file for writing, %s (%s). Error = %08x", __FUNCTION__, tempFileName.c_str(), tempOSPath.c_str(), GetLastError());
+ #else
+-            idLib::Warning("[%s]: Couldn't open file for writing, %s. Error = %s", __FUNCTION__, tempFileName.c_str(), strerror(errno));
++            idLib::Warning("[%s]: Couldn't open file for writing, %s (%s). Error = %s", __FUNCTION__, tempFileName.c_str(), tempOSPath.c_str(), strerror(errno));
+ #endif // DG end
+             file->error = true;
+             callback->errorCode = SAVEGAME_E_UNKNOWN;
+@@ -188,9 +191,9 @@ int idSaveGameThread::Save()
+             while (inputFile->NextWriteBlock(&block)) {
+                 if ((size_t)outputFile->Write(block.data, block.bytes) != block.bytes) {
+ #ifdef _WIN32 // DG: unify windows and posix savegames => replace GetLastError with strerror(errno)
+-                    idLib::Warning("[%s]: Write failed. Error = %08x", __FUNCTION__, GetLastError());
++                    idLib::Warning("[%s]: Write failed for %s. Error = %08x", __FUNCTION__, tempOSPath.c_str(), GetLastError());
+ #else
+-                    idLib::Warning("[%s]: Write failed. Error = %s", __FUNCTION__, strerror(errno));
++                    idLib::Warning("[%s]: Write failed for %s. Error = %s", __FUNCTION__, tempOSPath.c_str(), strerror(errno));
+ #endif // DG end
+                     file->error = true;
+                     callback->errorCode = SAVEGAME_E_INSUFFICIENT_ROOM;
+@@ -207,9 +210,9 @@ int idSaveGameThread::Save()
+                     size_t size = outputFile->WriteBig(checksum);
+                     if (size != sizeof(checksum)) {
+ #ifdef _WIN32 // DG: unify windows and posix savegames => replace GetLastError with strerror(errno)
+-                        idLib::Warning("[%s]: Write failed. Error = %08x", __FUNCTION__, GetLastError());
++                        idLib::Warning("[%s]: Write failed for %s. Error = %08x", __FUNCTION__, tempOSPath.c_str(), GetLastError());
+ #else
+-                        idLib::Warning("[%s]: Write failed. Error = %s", __FUNCTION__, strerror(errno));
++                        idLib::Warning("[%s]: Write failed for %s. Error = %s", __FUNCTION__, tempOSPath.c_str(), strerror(errno));
+ #endif // DG end
+                         file->error = true;
+                         callback->errorCode = SAVEGAME_E_INSUFFICIENT_ROOM;
+@@ -221,9 +224,9 @@ int idSaveGameThread::Save()
+             size_t size = outputFile->Write(file->GetDataPtr(), file->Length());
+             if (size != (size_t)file->Length()) {
+ #ifdef _WIN32 // DG: unify windows and posix savegames => replace GetLastError with strerror(errno)
+-                idLib::Warning("[%s]: Write failed. Error = %08x", __FUNCTION__, GetLastError());
++                idLib::Warning("[%s]: Write failed for %s. Error = %08x", __FUNCTION__, tempOSPath.c_str(), GetLastError());
+ #else
+-                idLib::Warning("[%s]: Write failed. Error = %s", __FUNCTION__, strerror(errno));
++                idLib::Warning("[%s]: Write failed for %s. Error = %s", __FUNCTION__, tempOSPath.c_str(), strerror(errno));
+ #endif // DG end
+                 file->error = true;
+                 callback->errorCode = SAVEGAME_E_INSUFFICIENT_ROOM;
+@@ -238,7 +241,10 @@ int idSaveGameThread::Save()
+         if (ret == ERROR_SUCCESS) {
+             // Remove the old file
+             if (!fileSystem->RenameFile(tempFileName, fileName, "fs_savePath")) {
+-                idLib::Warning("Could not start to rename temporary file %s to %s.", tempFileName.c_str(), fileName.c_str());
++                idLib::Warning("Could not rename temporary save file %s (%s) to %s.", tempFileName.c_str(), tempOSPath.c_str(), fileName.c_str());
++                file->error = true;
++                callback->errorCode = SAVEGAME_E_UNKNOWN;
++                ret = -1;
+             }
+         } else {
+             fileSystem->RemoveFile(tempFileName);
+             idLib::Warning("Invalid write to temporary file %s.", tempFileName.c_str());
+         }
+diff --git a/neo/sys/sys_profile.cpp b/neo/sys/sys_profile.cpp
+index 8912f89..535f780 100644
+--- a/neo/sys/sys_profile.cpp
++++ b/neo/sys/sys_profile.cpp
+@@ -259,6 +259,8 @@ void idProfileMgr::OnSaveSettingsCompleted(idSaveLoadParms* parms)
+     common->Dialog().ShowSaveIndicator(false);
+ 
+     if (parms->GetError() != SAVEGAME_E_NONE) {
++        idLib::Warning("Profile save failed (error=%d, inputDeviceId=%d, userId=%d).",
++            parms->GetError(), parms->inputDeviceId, parms->userId);
+         common->Dialog().AddDialog(GDM_PROFILE_SAVE_ERROR, DIALOG_CONTINUE, NULL, NULL, false);
+     }
+     if (game) {
