@@ -576,7 +576,7 @@ function offlineShellPlugin(): Plugin {
     apply: 'build',
     writeBundle(options) {
       const root = path.resolve(options.dir!);
-      const files = ['/', '/favicon.png', '/launcher-page_bg_raw.jpg', '/loading-art.png'];
+      const files = ['/', '/favicon.ico', '/app-icon-32.png', '/app-icon-192.png', '/app-icon-512.png', '/brand-banner.webp', '/brand-square.webp'];
       for (const dir of ['assets', 'fonts']) {
         for (const entry of fs.readdirSync(path.join(root, dir), { recursive: true, withFileTypes: true })) {
           if (entry.isFile()) files.push('/' + path.relative(root, path.join(entry.parentPath, entry.name)).replaceAll('\\', '/'));

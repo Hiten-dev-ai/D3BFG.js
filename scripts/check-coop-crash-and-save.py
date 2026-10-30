@@ -16,7 +16,7 @@ read_start = network.index('        idDict replicatedSpawnArgs;')
 read = network[read_start:network.index('\n        idTypeInfo*', read_start)]
 assert 'idDict args = replicatedSpawnArgs;' in network
 assert network.index('idDict args = replicatedSpawnArgs;') < network.index('SpawnEntityDef(args, &ent)')
-assert 'ASYNC_PROTOCOL_MAJOR 5' in (neo / 'framework/Licensee.h').read_text()
+assert 'ASYNC_PROTOCOL_MAJOR 6' in (neo / 'framework/Licensee.h').read_text()
 
 dialog = (neo / 'framework/Common_dialog.cpp').read_text(encoding='utf-8')
 start = dialog.index('void idCommonDialog::ShowSaveIndicator(')

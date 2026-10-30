@@ -2,17 +2,19 @@
 
 **Native engine. Browser battleground.**
 
-![D3BFG.js](web/public/brand.svg)
+![D3BFG.js project artwork](web/public/brand-banner.webp)
 
 A self-hosted DOOM 3 BFG Edition source port by **[Hiten-dev-ai](https://github.com/Hiten-dev-ai)**. The engine runs locally in your browser through **WebAssembly, pthreads and WebGL 2**—not a remote video stream. The server delivers your game assets, manages accounts and saves, and relays multiplayer traffic.
 
 > **Bring your own game.** No commercial game files are included in this repository or its releases. You must supply a legally obtained **DOOM 3 BFG Edition** installation on your server. Owning the game does not grant permission to redistribute its assets. Keep your server private and respect the game's license.
 
+> **Co-op is VERY EXPERIMENTAL.** It can crash and has known synchronization, lighting and campaign edge cases. Back up your saves, use a test campaign, and do not rely on it for an uninterrupted playthrough. Fixing one captured crash does not establish general co-op stability.
+
 ## Built for the browser. Still DOOM.
 
 - **Original in-game interface:** native BFG menus, HUD, campaign selector and controls, with browser settings integrated into the game.
 - **Real client-side rendering:** threaded native C++ engine compiled to Wasm, WebGL 2 rendering, software Bink decoding and browser audio.
-- **Campaign co-op:** host-authoritative world state, two-player rooms, private invites, lives and Friendly Fire controls, save-backed partner inventory and reconnect support.
+- **Very experimental campaign co-op:** host-authoritative world state, two-player rooms, private invites, lives and Friendly Fire controls, save-backed partner inventory and reconnect support. See the warning above.
 - **Versus multiplayer:** lobby discovery, private rooms and a WebSocket relay preserving native packet routing.
 - **Stream what you need:** on-demand map resources and OPFS cache policies rather than copying an entire installation into the JavaScript heap.
 - **Your progress, your server:** authenticated accounts, isolated save snapshots, local persistence and cached offline play where the required resources are available.
@@ -21,6 +23,24 @@ A self-hosted DOOM 3 BFG Edition source port by **[Hiten-dev-ai](https://github.
 This is an **experimental source port**, not an official id Software product. Co-op visual parity, campaign edge cases and browser-dependent audio/input still need testing. A passing build is not a guarantee of a complete campaign or a glitch-free multiplayer session.
 
 **Coming next:** a native Android port is planned. It is not part of these releases.
+
+## Screenshots
+
+Screenshots supplied by the project owner, kept at their original dimensions.
+Only the browser address-bar domain has been covered in black. They show work
+in progress, not a claim of complete campaign or multiplayer compatibility.
+
+![Native BFG main menu](docs/screenshots/main-menu.webp)
+![Mars City running in the browser](docs/screenshots/mars-city.webp)
+
+<details>
+<summary>Settings, multiplayer and franchise selection</summary>
+
+![Native Settings](docs/screenshots/settings.webp)
+![Very experimental multiplayer](docs/screenshots/multiplayer.webp)
+![Original franchise selector](docs/screenshots/game-selector.webp)
+
+</details>
 
 ## Run a server
 
@@ -56,12 +76,19 @@ The game runs on each player's machine: use a recent Chromium-family desktop bro
 - `HOST`, `PORT`, `NODE_ENV` and owned game-data location.
 - Account and save storage locations; first-owner credentials.
 - `MULTIPLAYER_ENABLED` to enable/disable online rooms server-wide.
+- `OFFLINE_PLAYBACK_ALLOWED` (default `true`) to permit cached offline starts. A last-known `false` policy blocks offline startup without deleting cached assets or saves.
 - `SHARED_ASSET_CACHE` to reuse precompressed assets across authenticated clients, never account/save responses.
 - Initial browser cache, save persistence, developer-level, console, cinematic and frame-rate preferences. Existing browser preferences take priority.
 
+See the [complete configuration reference](docs/CONFIGURATION.md) for paths,
+first-owner setup, precedence, TLS, browser defaults, offline-policy limits and
+upgrade/backup guidance. Audio settings include **Pause audio when unfocused**,
+enabled by default and applied live. Campaign intro movies play normally;
+**Cinematic skip mode** controls what happens when the player requests a skip.
+
 ## Build from source
 
-Use **Node.js 24 LTS**, Python 3, CMake, Ninja, PowerShell 7 and **Emscripten 6.0.13**. The engine is pinned as a submodule; the maintained patch rollup contains the browser adaptation.
+Use **Node.js 24 LTS**, Python 3, CMake, Ninja, PowerShell 7 and **Emscripten 6.0.13**. Pillow is used only by artwork preparation/image verification (`python -m pip install Pillow`). The engine is pinned as a submodule; the maintained patch rollup contains the browser adaptation.
 
 ```sh
 git clone --recurse-submodules https://github.com/Hiten-dev-ai/D3BFG.js.git

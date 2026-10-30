@@ -103,12 +103,12 @@ test('repeated create is idempotent and other invalid requests explain the probl
 
 test('campaign snapshot protocols cannot mix cached and updated engines', async () => {
   const host = await connect();
-  send(host.socket, { type: 'transport', version: 2, gameProtocol: 5 });
+  send(host.socket, { type: 'transport', version: 2, gameProtocol: 6 });
   await nextMessage(host.socket, value => value.type === 'transport');
   send(host.socket, createRequest({ kind: 'coop', mode: 'coop', maxPlayers: 2 }));
   const room = await nextMessage(host.socket, value => value.type === 'joined');
   const old = await connect();
-  send(old.socket, { type: 'transport', version: 2, gameProtocol: 4 });
+  send(old.socket, { type: 'transport', version: 2, gameProtocol: 5 });
   assert.equal((await nextMessage(old.socket, value => value.type === 'error')).code, 'BAD_REQUEST');
   // This legacy peer never negotiated, so it cannot join the new snapshot room.
   const legacyPeer = await connect();
@@ -116,7 +116,7 @@ test('campaign snapshot protocols cannot mix cached and updated engines', async 
   const error = await nextMessage(legacyPeer.socket, value => value.type === 'error');
   assert.match(error.detail, /versions differ/);
   const guest = await connect();
-  send(guest.socket, { type: 'transport', version: 2, gameProtocol: 5 });
+  send(guest.socket, { type: 'transport', version: 2, gameProtocol: 6 });
   await nextMessage(guest.socket, value => value.type === 'transport');
   send(guest.socket, { type: 'join', lobbyId: room.lobby.id });
   assert.equal((await nextMessage(guest.socket, value => value.type === 'joined')).lobby.id, room.lobby.id);

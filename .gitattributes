@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.patch -text
 *.ttf binary
+*.png binary
+*.webp binary
+*.ico binary

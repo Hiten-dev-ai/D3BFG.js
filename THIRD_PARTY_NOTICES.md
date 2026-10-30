@@ -13,4 +13,4 @@ D3BFG.js is a browser adaptation by Hiten-dev-ai, not a replacement attribution 
 
 Commercial DOOM 3 BFG Edition data is not covered by the engine's GPL. Release packages and public source exports exclude game resource archives, maps, textures, sounds, cinematics and WAD files. Operators must supply legally obtained data and control access appropriately.
 
-The generated launcher illustration `brand.svg` is original D3BFG.js artwork. The native game menus shown during play are rendered from the operator's own game assets.
+Project presentation artwork and screenshots were supplied by the project owner for the launcher and repository. Screenshot address-bar text is redacted; dimensions and remaining pixels are preserved. These images are not playable game assets and do not place commercial game artwork or trademarks under the engine's GPL. The earlier `brand.svg` remains an original fallback illustration. Native game menus shown during play are rendered from the operator's own game assets.

@@ -21,6 +21,7 @@ async function run(mode, offline, stale = false) {
     OPFS_PERM_DIR: 'permanent', activeManifest: null, opfsRootHandle: null, discoveredMapArchiveNames: null,
     readCachedManifest: () => manifest, writeCachedManifest() {},
     looksLikeNetworkFailure: () => true, markBootedOffline: value => { offlineMarked = value; }, queueNativeNotice() {},
+    assertOfflinePlaybackAllowed() {},
     updateLoadingProgress() {}, formatBytes: String, formatEta: String, previousEngineStartupSeconds: () => null,
     fetch: async url => {
       if (offline) throw new TypeError('Failed to fetch');

@@ -39,10 +39,14 @@ initial-inventory transfer also supplies PDA/items that those snapshots do not
 represent. Chunks stay below the reliable-message buffer size and apply complete
 inventory to a newly created guest, not to every frame of active play.
 
-Native and relay protocol **5** rejects older incompatible clients. Both players
+Native and relay protocol **6** rejects older incompatible clients. Both players
 must reload after an update. Friendly Fire is host-owned and repeated in co-op
 game snapshots; partner-damage suppression runs before armor and knockback in
 both directions. Enemy and self damage retain their normal rules.
+
+Unarmed/not-yet-selected weapon `-1` is transmitted as a signed snapshot field.
+The previous unsigned six-bit field aborted when a new guest inherited an
+unarmed host's selection during the opening campaign sequence.
 
 ## Verification boundary
 

@@ -21,7 +21,7 @@ assets stay in your private game directory and must never be committed or shippe
 ## Ubuntu / Debian package
 
 ```sh
-sudo apt install ./d3bfg-js_0.2.0_amd64.deb
+sudo apt install ./d3bfg-js_0.2.1_amd64.deb
 sudoedit /etc/d3bfg-js/server.env
 # Set an absolute game directory readable by d3bfg-js, credentials and TLS mode.
 sudo systemctl enable --now d3bfg-js

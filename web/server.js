@@ -81,6 +81,7 @@ const MIME_TYPES = {
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
   '.txt': 'text/plain; charset=utf-8',
   '.ttf': 'font/ttf',
 };
@@ -644,7 +645,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (pathname === '/__server_config' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify({ browserDefaults: serverConfig.browserDefaults, multiplayer: serverConfig.multiplayer })); return;
+    res.end(JSON.stringify({ browserDefaults: serverConfig.browserDefaults, multiplayer: serverConfig.multiplayer,
+      offlinePlaybackAllowed: serverConfig.offlinePlaybackAllowed })); return;
   }
 
   try {

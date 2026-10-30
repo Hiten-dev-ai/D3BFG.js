@@ -6,6 +6,7 @@ import { requirePrivateAccess, getCurrentAccount } from './privateAccess';
 import { prepareSaveSync, setSaveSyncEnabled, accountSavePath, flushSaveSync, applyPendingAccountRemoval } from './saveSync';
 import { cacheAllMapArchives } from './assetPolicy';
 import { markBootedOffline, isBootedOffline, queueNativeNotice } from './nativeNotices';
+import { assertOfflinePlaybackAllowed } from './offlinePolicy';
 import {
   type ScannedFile,
   validateGameData,
@@ -105,6 +106,7 @@ async function acquireGameLease(): Promise<void> {
   releaseGameLease();
   gameLeaseClosing = false;
   if (navigator.onLine === false || isBootedOffline()) {
+    assertOfflinePlaybackAllowed();
     offlineLease = true;
     console.info('[DOOM 3 BFG Web] Offline: skipping the account reservation for this session.');
     return;
@@ -142,7 +144,7 @@ async function acquireGameLease(): Promise<void> {
         gameLease = null;
         markBootedOffline(true);
         setSaveSyncEnabled(false);
-        queueNativeNotice('Connection lost. Cached single-player play and local saves remain available.');
+        queueNativeNotice('Connection lost. Cached single-player play and local saves remain available.', true);
       }
     });
     socket.addEventListener('error', () => { if (!acquired) reject(new Error('Could not connect to the game server.')); });
@@ -444,7 +446,7 @@ async function syncAssetsToOpfs(): Promise<ScannedFile[]> {
       manifest = { gameDir: '', manifestEtag: cached.manifestEtag, files: cached.files };
       offlineBoot = true;
       markBootedOffline(true);
-      queueNativeNotice('Offline: the game will start from cached data and online features are unavailable.');
+      assertOfflinePlaybackAllowed();
     }
     if (!manifest) {
       if (!resp) throw new Error('The asset manifest could not be requested.');
@@ -459,7 +461,7 @@ async function syncAssetsToOpfs(): Promise<ScannedFile[]> {
       writeCachedManifest(manifest);
       markBootedOffline(navigator.onLine === false);
       if (navigator.onLine === false) {
-        queueNativeNotice('Offline: the game will start from cached data and online features are unavailable.');
+        assertOfflinePlaybackAllowed();
       }
     }
   } catch (err: unknown) {
@@ -936,6 +938,7 @@ async function main(): Promise<void> {
     await applyPendingAssetClear();
     await requirePrivateAccess();
     await serverDefaultsReady;
+    if (isBootedOffline()) assertOfflinePlaybackAllowed();
     await acquireGameLease();
     if (getCurrentAccount()) browserPreferences.persistSaves = 1;
     updateFullscreenGate();
@@ -1201,6 +1204,7 @@ async function main(): Promise<void> {
       let runtimeTraceTimer: number | undefined;
       let runtimeTracePersistence = Promise.resolve();
       let productionTraceEvents = 0;
+      const fatalTraceKeys = new Set<string>();
 
       const postRuntimeTrace = (body: string) => {
         runtimeTracePersistence = runtimeTracePersistence.then(() => fetch('/__local_game/trace', {
@@ -1252,6 +1256,11 @@ async function main(): Promise<void> {
           const fatal = /^\[BFG Engine (?:Error|Abort)\]/.test(line);
           if (!fatal && (!/^\[(?:web-port (?:map|menu|session)|physics|snapshot)\]/.test(line) || productionTraceEvents++ >= 128)) return;
           if (fatal) {
+            // Preserve the first native Sys_Error before shutdown callbacks
+            // produce secondary proxy assertions, without exhausting the reserve.
+            const key = line.includes('emscripten_proxy_async failed') ? 'secondary-proxy-assertion' : line.slice(0, 300);
+            if (fatalTraceKeys.has(key) || fatalTraceKeys.size >= 8) return;
+            fatalTraceKeys.add(key);
             // A wasm trap carries no reliable frame names in production, so ship the
             // tail of the engine log alongside it. That is usually enough to tell
             // which stage of the game frame was running when the trap happened.
@@ -1333,7 +1342,7 @@ async function main(): Promise<void> {
           if (!line.includes('[web-port thread] wait begin') && !line.includes('[web-port thread] wait end')) {
             console.log('[BFG Engine]', ...values);
             rememberBreadcrumb(line);
-            reportRuntimeTrace(line.startsWith('ERROR:') ? ['[BFG Engine Error]', line] : values);
+            reportRuntimeTrace(/^(?:ERROR:|Sys_Error:)/.test(line) ? ['[BFG Engine Error]', line] : values);
           }
         },
         printErr: (...values: unknown[]) => {

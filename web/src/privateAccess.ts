@@ -1,5 +1,6 @@
 ﻿import { initializeAccountUI, getCurrentAccount, showAccountLogin, type AccountUser } from './accountUI';
 import { markBootedOffline } from './nativeNotices';
+import { assertOfflinePlaybackAllowed } from './offlinePolicy';
 
 export async function requirePrivateAccess(): Promise<AccountUser | null> {
   const cachedAccount = getCurrentAccount();
@@ -12,6 +13,7 @@ export async function requirePrivateAccess(): Promise<AccountUser | null> {
     // still open the menu and play from cached data; the account check simply
     // runs again the next time the network is available.
     if (cachedAccount) {
+      assertOfflinePlaybackAllowed();
       console.warn('[DOOM 3 BFG Web] Offline: using the cached account for this session.');
       markBootedOffline(true);
       return cachedAccount;
@@ -24,6 +26,7 @@ export async function requirePrivateAccess(): Promise<AccountUser | null> {
   // A gateway/server error is not a rejection of this device: keep the cached
   // session usable instead of locking the player out of the menu.
   if (!response.ok && response.status >= 500 && cachedAccount) {
+    assertOfflinePlaybackAllowed();
     console.warn('[DOOM 3 BFG Web] The private server is unavailable; using the cached account for this session.');
     markBootedOffline(true);
     return cachedAccount;

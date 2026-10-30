@@ -89,7 +89,7 @@ function makePacket(peerId, destinationPort, payload, sourcePort = destinationPo
   socket.open();
   assert.equal(socket.sent.length, 0, 'connect must not auto-send singleplayer or lobby requests');
   socket.message(JSON.stringify({ type: 'welcome', peerId: 41 }));
-  assert.deepEqual(readControl(socket), { type: 'transport', version: 2, gameProtocol: 5 });
+  assert.deepEqual(readControl(socket), { type: 'transport', version: 2, gameProtocol: 6 });
   socket.message(JSON.stringify({ type: 'transport', version: 2 }));
   await connected;
   assert.equal(client.state.status, 'connected');
@@ -183,7 +183,7 @@ function makePacket(peerId, destinationPort, payload, sourcePort = destinationPo
   socket = FakeWebSocket.instances[2];
   socket.open();
   socket.message(JSON.stringify({ type: 'welcome', peerId: 42 }));
-  assert.deepEqual(readControl(socket), { type: 'transport', version: 2, gameProtocol: 5 });
+  assert.deepEqual(readControl(socket), { type: 'transport', version: 2, gameProtocol: 6 });
   socket.message(JSON.stringify({ type: 'error', code: 'BAD_REQUEST' }));
   await reconnected;
   oldRoomMessage({ data: JSON.stringify({ type: 'error', code: 'FULL' }) });

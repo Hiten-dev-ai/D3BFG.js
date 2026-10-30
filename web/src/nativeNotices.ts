@@ -10,6 +10,8 @@ const MAX_NOTICES = 4;
 const MAX_NOTICE_LENGTH = 200;
 
 const pending: string[] = [];
+const mainMenuOnly = new Set<string>();
+let announcedOffline = false;
 // Marks whether the current boot started without a network connection. Only an
 // offline start should produce the "Connected to internet" confirmation.
 let bootedOffline = false;
@@ -19,13 +21,16 @@ function sanitize(message: string): string {
   return message.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, MAX_NOTICE_LENGTH);
 }
 
-export function queueNativeNotice(message: string): void {
+export function queueNativeNotice(message: string, atMainMenuOnly = false): void {
   const text = sanitize(message);
   if (!text) return;
   if (pending.includes(text)) return;
+  if (atMainMenuOnly) mainMenuOnly.add(text);
   pending.push(text);
-  while (pending.length > MAX_NOTICES) pending.shift();
+  while (pending.length > MAX_NOTICES) mainMenuOnly.delete(pending.shift()!);
 }
+
+export function nativeNoticeMainMenuOnly(): number { return mainMenuOnly.has(pending[0]) ? 1 : 0; }
 
 export function nativeNoticeCount(): number {
   return pending.length;
@@ -36,11 +41,15 @@ export function peekNativeNotice(): string {
 }
 
 export function dismissNativeNotice(): void {
-  pending.shift();
+  mainMenuOnly.delete(pending.shift()!);
 }
 
 export function markBootedOffline(offline: boolean): void {
   bootedOffline = offline;
+  if (offline && !announcedOffline) {
+    announcedOffline = true;
+    queueNativeNotice('Unable to connect to the server. Cached single-player play is available; online features are unavailable.', true);
+  }
   // A fresh online boot has nothing to announce later.
   if (!offline) announcedReconnect = true;
 }

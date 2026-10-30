@@ -13,7 +13,7 @@ await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
 const port = listener.address().port;
 await new Promise(resolve => listener.close(resolve));
 const envFile = path.join(temporary, 'test.env');
-fs.writeFileSync(envFile, `HOST=127.0.0.1\nPORT=${port}\nNODE_ENV=development\nDOOM3BFG_GAME_DIR=${temporary.replaceAll('\\', '/')}/owned-game\nDOOM3BFG_ACCOUNTS_DIR=${temporary.replaceAll('\\', '/')}/accounts\nDOOM3BFG_SYNC_DIR=${temporary.replaceAll('\\', '/')}/saves\nFIRST_USERNAME=PackageTest\nFIRST_EMAIL=package@example.test\nFIRST_PASSWORD=test-only-package-password-314159\nMULTIPLAYER_ENABLED=false\nBROWSER_CACHE_MODE=2\n`);
+fs.writeFileSync(envFile, `HOST=127.0.0.1\nPORT=${port}\nNODE_ENV=development\nDOOM3BFG_GAME_DIR=${temporary.replaceAll('\\', '/')}/owned-game\nDOOM3BFG_ACCOUNTS_DIR=${temporary.replaceAll('\\', '/')}/accounts\nDOOM3BFG_SYNC_DIR=${temporary.replaceAll('\\', '/')}/saves\nFIRST_USERNAME=PackageTest\nFIRST_EMAIL=package@example.test\nFIRST_PASSWORD=test-only-package-password-314159\nMULTIPLAYER_ENABLED=false\nOFFLINE_PLAYBACK_ALLOWED=false\nBROWSER_CACHE_MODE=2\n`);
 const env = { ...process.env, D3BFG_ENV_FILE: envFile };
 // A parent process's deployment settings must not contaminate the fixture.
 for (const key of ['HOST', 'PORT', 'NODE_ENV', 'DOOM3BFG_GAME_DIR', 'DOOM3BFG_ACCOUNTS_DIR', 'DOOM3BFG_SYNC_DIR', 'FIRST_USERNAME', 'FIRST_EMAIL', 'FIRST_PASSWORD']) delete env[key];
@@ -35,6 +35,9 @@ try {
   assert.equal((await fetch(base + '/__local_game/manifest')).status, 401);
   const config = await (await fetch(base + '/__server_config')).json();
   assert.equal(config.multiplayer, false); assert.equal(config.browserDefaults.cacheMode, 2);
+  assert.equal(config.offlinePlaybackAllowed, false); assert.equal(config.browserDefaults.pauseAudioUnfocused, 1);
+  assert.equal((await fetch(base + '/favicon.ico')).status, 200);
+  const art = await fetch(base + '/brand-banner.webp'); assert.equal(art.status, 200); assert.match(art.headers.get('content-type'), /image\/webp/);
   assert(!JSON.stringify(config).includes('PASSWORD'));
   const login = await fetch(base + '/__session/login', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' },
     body: JSON.stringify({ login: 'PackageTest', password: 'test-only-package-password-314159' }) });

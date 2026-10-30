@@ -31,7 +31,7 @@ def copy(file, relative=None):
 
 for name in ['README.md', 'CONTRIBUTING.md', 'THIRD_PARTY_NOTICES.md', 'COPYING.txt', '.gitignore', '.gitattributes', '.gitmodules', '.env.example', 'CMakeLists.txt', 'CMakePresets.json']:
     copy(root / name)
-for name in ['SERVER_SETUP.md', 'COOP_INVENTORY.md', 'RELEASE_0.2.0.md']:
+for name in ['SERVER_SETUP.md', 'CONFIGURATION.md', 'COOP_INVENTORY.md', 'RELEASE_0.2.0.md', 'RELEASE_0.2.1.md']:
     copy(root / 'docs' / name)
 for folder in ['wasm', 'third_party', 'patches', 'web/src']:
     for file in (root / folder).rglob('*'):
@@ -39,16 +39,21 @@ for folder in ['wasm', 'third_party', 'patches', 'web/src']:
 for file in (root / 'web').iterdir():
     if file.is_file() and file.suffix in {'.js', '.json', '.html', '.ts'}: copy(file)
 for file in (root / 'web/scripts').glob('*.mjs'): copy(file)
-for name in ['offline-sw.js', 'brand.svg', 'fonts/Rajdhani-SemiBold.ttf', 'fonts/OFL.txt']:
+for name in ['offline-sw.js', 'brand.svg', 'favicon.ico', 'app-icon-32.png', 'app-icon-192.png', 'app-icon-512.png', 'brand-banner.webp', 'brand-square.webp', 'fonts/Rajdhani-SemiBold.ttf', 'fonts/OFL.txt']:
     copy(root / 'web/public' / name)
+for file in (root / 'docs/screenshots').glob('*.webp'): copy(file)
 for file in (root / 'scripts').iterdir():
     if file.is_file() and not file.name.startswith(('.', 'deploy-')) and file.suffix in {'.py', '.ps1', '.cjs', '.mjs'}: copy(file)
 
 denied = {'.resources', '.pk4', '.wad', '.bik', '.roq', '.bimage', '.save', '.wasm', '.exe', '.jpg', '.png'}
 for file in destination.rglob('*'):
     if not file.is_file(): continue
-    if file.suffix in denied or file.name in {'.env', 'accounts.json', 'snapshot.json'}: raise SystemExit(f'Forbidden file: {file}')
-    if file.suffix not in {'.ttf'}:
+    media = file.relative_to(destination).as_posix() in {
+        'web/public/app-icon-32.png', 'web/public/app-icon-192.png', 'web/public/app-icon-512.png', 'web/public/favicon.ico',
+        'web/public/brand-banner.webp', 'web/public/brand-square.webp', 'docs/screenshots/settings.webp', 'docs/screenshots/main-menu.webp',
+        'docs/screenshots/multiplayer.webp', 'docs/screenshots/game-selector.webp', 'docs/screenshots/mars-city.webp'}
+    if (file.suffix in denied and not media) or file.name in {'.env', 'accounts.json', 'snapshot.json'}: raise SystemExit(f'Forbidden file: {file}')
+    if file.suffix not in {'.ttf', '.png', '.ico', '.webp'}:
         text = file.read_text(errors='replace')
         for pattern in [r'gh[opusr]_[A-Za-z0-9]{30,}', r'github_pat_[A-Za-z0-9_]{40,}', r'-----BEGIN (?:RSA |OPENSSH )?PRIVATE KEY-----\r?\n']:
             if re.search(pattern, text): raise SystemExit(f'Secret pattern in {file}')
@@ -60,7 +65,8 @@ subprocess.run(['git', '-C', str(destination), '-c', 'core.autocrlf=false', 'add
 subprocess.run(['git', '-C', str(destination), 'update-index', '--add', '--cacheinfo', f'160000,{revision},engine/chocolate-doom3-bfg'], check=True)
 
 out = root / 'dist/releases'; out.mkdir(parents=True, exist_ok=True)
-archive = out / 'd3bfg-js-0.2.0-source.tar.gz'
+version = json.loads((root / 'web/package.json').read_text())['version']
+archive = out / f'd3bfg-js-{version}-source.tar.gz'
 with tarfile.open(archive, 'w:gz') as bundle:
     for file in destination.rglob('*'):
         if file.is_file() and '.git' not in file.relative_to(destination).parts:

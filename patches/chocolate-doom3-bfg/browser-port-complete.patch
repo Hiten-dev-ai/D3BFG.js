@@ -1852,7 +1852,7 @@ index d332018..dbcd19b 100644
  
  ID_INLINE idMultiplayerGame::gameState_t idMultiplayerGame::GetGameState() const
 diff --git a/neo/d3xp/Player.cpp b/neo/d3xp/Player.cpp
-index 27cb855..1e706f6 100644
+index 27cb855..4b52509 100644
 --- a/neo/d3xp/Player.cpp
 +++ b/neo/d3xp/Player.cpp
 @@ -1349,6 +1349,13 @@ idPlayer::idPlayer()
@@ -2278,7 +2278,18 @@ index 27cb855..1e706f6 100644
  
      // determine knockback
      int knockback = 0;
-@@ -10162,6 +10374,7 @@ void idPlayer::WriteToSnapshot(idBitMsg& msg) const
+@@ -10136,7 +10348,9 @@ void idPlayer::WriteToSnapshot(idBitMsg& msg) const
+     msg.WriteBits(gameLocal.ServerRemapDecl(-1, DECL_ENTITYDEF, lastDamageDef), gameLocal.entityDefBits);
+     msg.WriteDir(lastDamageDir, 9);
+     msg.WriteShort(lastDamageLocation);
+-    msg.WriteBits(idealWeapon.Get(), idMath::BitsForInteger(MAX_WEAPONS));
++    // -1 is the legitimate unarmed/not-yet-selected state (including a guest
++    // seeded from a host in the arrival cinematic). Unsigned bits fatal here.
++    msg.WriteBits(idealWeapon.Get(), -idMath::BitsForInteger(MAX_WEAPONS));
+     msg.WriteBits(inventory.weapons, MAX_WEAPONS);
+     msg.WriteBits(weapon.GetSpawnId(), 32);
+     msg.WriteBits(flashlight.GetSpawnId(), 32);
+@@ -10162,6 +10376,7 @@ void idPlayer::WriteToSnapshot(idBitMsg& msg) const
      msg.WriteBits(usercmd.forwardmove, -8);
      msg.WriteBits(usercmd.rightmove, -8);
  
@@ -2286,7 +2297,16 @@ index 27cb855..1e706f6 100644
      msg.WriteBool(spectating);
  }
  
-@@ -10225,6 +10438,7 @@ void idPlayer::ReadFromSnapshot(const idBitMsg& msg)
+@@ -10198,7 +10413,7 @@ void idPlayer::ReadFromSnapshot(const idBitMsg& msg)
+     lastDamageDef = gameLocal.ClientRemapDecl(DECL_ENTITYDEF, msg.ReadBits(gameLocal.entityDefBits));
+     lastDamageDir = msg.ReadDir(9);
+     lastDamageLocation = msg.ReadShort();
+-    newIdealWeapon = msg.ReadBits(idMath::BitsForInteger(MAX_WEAPONS));
++    newIdealWeapon = msg.ReadBits(-idMath::BitsForInteger(MAX_WEAPONS));
+     inventory.weapons = msg.ReadBits(MAX_WEAPONS);
+     weaponSpawnId = msg.ReadBits(32);
+     flashlightSpawnId = msg.ReadBits(32);
+@@ -10225,6 +10440,7 @@ void idPlayer::ReadFromSnapshot(const idBitMsg& msg)
      signed char snapshotForward = msg.ReadBits(-8);
      signed char snapshotRight = msg.ReadBits(-8);
  
@@ -2734,7 +2754,7 @@ index ed9b491..2350c29 100644
      const idSoundShader* typeSoundShader;
      const idMaterial* doom3Intro;
 diff --git a/neo/d3xp/menus/MenuHandler_Shell.cpp b/neo/d3xp/menus/MenuHandler_Shell.cpp
-index 052b20c..dd482d0 100644
+index 052b20c..db423fa 100644
 --- a/neo/d3xp/menus/MenuHandler_Shell.cpp
 +++ b/neo/d3xp/menus/MenuHandler_Shell.cpp
 @@ -28,12 +28,58 @@ If you have questions concerning this license or the applicable additional terms
@@ -2796,7 +2816,7 @@ index 052b20c..dd482d0 100644
  void idMenuHandler_Shell::Update()
  {
  
-@@ -53,13 +99,75 @@ void idMenuHandler_Shell::Update()
+@@ -53,13 +99,67 @@ void idMenuHandler_Shell::Update()
          return;
      }
  
@@ -2820,7 +2840,9 @@ index 052b20c..dd482d0 100644
 +        }
 +        if (now - webLastNativeNoticePoll >= 250) {
 +            webLastNativeNoticePoll = now;
-+            if (!webNativeNoticePending && BrowserBridge_GetNumber("nativeNoticeCount") > 0) {
++            const bool noticeAtMainMenu = !BrowserBridge_GetNumber("nativeNoticeMainMenuOnly") ||
++                (!inGame && activeScreen == SHELL_AREA_ROOT && nextScreen == SHELL_AREA_ROOT && !showingIntro && !IsPacifierVisible());
++            if (!webNativeNoticePending && noticeAtMainMenu && BrowserBridge_GetNumber("nativeNoticeCount") > 0) {
 +                WebShowNativeNotice();
 +            }
 +        }
@@ -2835,16 +2857,6 @@ index 052b20c..dd482d0 100644
 +        StartGame(gameIndex);
 +        showingIntro = false;
 +        webIntroDispatching = false;
-+    }
-+    // "Skip" intro mode starts the campaign as soon as the intro surface is up.
-+    // StartGame keeps those frames on screen until the game can render, then
-+    // fades, so the skip never hangs on a blank frame.
-+    if (showingIntro && !webIntroDispatching && webIntroPendingGame < 0 && webIntroAutoStartAt != 0 &&
-+        Sys_Milliseconds() >= webIntroAutoStartAt) {
-+        webIntroAutoStartAt = 0;
-+        if (introGui != NULL && introGui->IsActive()) {
-+            StartGame(newGameType);
-+        }
 +    }
 +#endif
 +
@@ -2873,7 +2885,7 @@ index 052b20c..dd482d0 100644
              gui->StopSound();
              showingIntro = false;
              introGui->Activate(false);
-@@ -128,6 +236,27 @@ void idMenuHandler_Shell::Update()
+@@ -128,6 +228,27 @@ void idMenuHandler_Shell::Update()
          }
      }
  
@@ -2901,7 +2913,7 @@ index 052b20c..dd482d0 100644
      if (activeScreen != nextScreen) {
  
          ClearWidgetActionRepeater();
-@@ -179,7 +308,39 @@ void idMenuHandler_Shell::Update()
+@@ -179,7 +300,39 @@ void idMenuHandler_Shell::Update()
          }
      }
  
@@ -2941,7 +2953,7 @@ index 052b20c..dd482d0 100644
  
      if (activeScreen == nextScreen && activeScreen == SHELL_AREA_LEADERBOARDS) {
          idMenuScreen_Shell_Leaderboards* screen = dynamic_cast<idMenuScreen_Shell_Leaderboards*>(menuScreens[SHELL_AREA_LEADERBOARDS]);
-@@ -221,6 +382,14 @@ void idMenuHandler_Shell::Update()
+@@ -221,6 +374,14 @@ void idMenuHandler_Shell::Update()
  
      if (introGui != NULL && introGui->IsActive()) {
          introGui->Render(renderSystem, Sys_Milliseconds());
@@ -2956,7 +2968,7 @@ index 052b20c..dd482d0 100644
      }
  
      if (continueWaitForEnumerate) {
-@@ -256,12 +425,56 @@ idMenuHandler_Shell::HandleGuiEvent
+@@ -256,12 +417,56 @@ idMenuHandler_Shell::HandleGuiEvent
  */
  bool idMenuHandler_Shell::HandleGuiEvent(const sysEvent_t* sev)
  {
@@ -3014,7 +3026,7 @@ index 052b20c..dd482d0 100644
          return true;
      }
  
-@@ -362,6 +575,15 @@ bool idMenuHandler_Shell::HandleGuiEvent(const sysEvent_t* sev)
+@@ -362,6 +567,15 @@ bool idMenuHandler_Shell::HandleGuiEvent(const sysEvent_t* sev)
          return true;
      }
  
@@ -3030,7 +3042,7 @@ index 052b20c..dd482d0 100644
      return idMenuHandler::HandleGuiEvent(sev);
  }
  
-@@ -373,6 +595,7 @@ idMenuHandler_Shell::Initialize
+@@ -373,6 +587,7 @@ idMenuHandler_Shell::Initialize
  void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
  {
      idMenuHandler::Initialize(swfFile, sw);
@@ -3038,7 +3050,7 @@ index 052b20c..dd482d0 100644
  
      //---------------------
      // Initialize the menus
-@@ -381,6 +604,12 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
+@@ -381,6 +596,12 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
      menuScreens[(screenId)] = new (TAG_SWF) className();    \
      menuScreens[(screenId)]->Initialize(menuHandler);       \
      menuScreens[(screenId)]->AddRef();
@@ -3051,7 +3063,7 @@ index 052b20c..dd482d0 100644
  
      for (int i = 0; i < SHELL_NUM_AREAS; ++i) {
          menuScreens[i] = NULL;
-@@ -396,6 +625,12 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
+@@ -396,6 +617,12 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
          BIND_SHELL_SCREEN(SHELL_AREA_SETTINGS, idMenuScreen_Shell_Settings, this);
          BIND_SHELL_SCREEN(SHELL_AREA_LOAD, idMenuScreen_Shell_Load, this);
          BIND_SHELL_SCREEN(SHELL_AREA_SYSTEM_OPTIONS, idMenuScreen_Shell_SystemOptions, this);
@@ -3064,7 +3076,7 @@ index 052b20c..dd482d0 100644
          BIND_SHELL_SCREEN(SHELL_AREA_GAME_OPTIONS, idMenuScreen_Shell_GameOptions, this);
          BIND_SHELL_SCREEN(SHELL_AREA_SAVE, idMenuScreen_Shell_Save, this);
          BIND_SHELL_SCREEN(SHELL_AREA_STEREOSCOPICS, idMenuScreen_Shell_Stereoscopics, this);
-@@ -415,6 +650,12 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
+@@ -415,6 +642,12 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
          BIND_SHELL_SCREEN(SHELL_AREA_LOAD, idMenuScreen_Shell_Load, this);
          BIND_SHELL_SCREEN(SHELL_AREA_NEW_GAME, idMenuScreen_Shell_NewGame, this);
          BIND_SHELL_SCREEN(SHELL_AREA_SYSTEM_OPTIONS, idMenuScreen_Shell_SystemOptions, this);
@@ -3077,7 +3089,7 @@ index 052b20c..dd482d0 100644
          BIND_SHELL_SCREEN(SHELL_AREA_GAME_OPTIONS, idMenuScreen_Shell_GameOptions, this);
          BIND_SHELL_SCREEN(SHELL_AREA_PARTY_LOBBY, idMenuScreen_Shell_PartyLobby, this);
          BIND_SHELL_SCREEN(SHELL_AREA_GAME_LOBBY, idMenuScreen_Shell_GameLobby, this);
-@@ -428,7 +669,11 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
+@@ -428,7 +661,11 @@ void idMenuHandler_Shell::Initialize(const char* swfFile, idSoundWorld* sw)
          BIND_SHELL_SCREEN(SHELL_AREA_LEADERBOARDS, idMenuScreen_Shell_Leaderboards, this);
          BIND_SHELL_SCREEN(SHELL_AREA_GAMEPAD, idMenuScreen_Shell_Gamepad, this);
          BIND_SHELL_SCREEN(SHELL_AREA_MATCH_SETTINGS, idMenuScreen_Shell_MatchSettings, this);
@@ -3089,7 +3101,7 @@ index 052b20c..dd482d0 100644
          BIND_SHELL_SCREEN(SHELL_AREA_BROWSER, idMenuScreen_Shell_GameBrowser, this);
          BIND_SHELL_SCREEN(SHELL_AREA_CREDITS, idMenuScreen_Shell_Credits, this);
  
-@@ -546,6 +791,9 @@ idMenuHandler_Shell::Cleanup
+@@ -546,6 +783,9 @@ idMenuHandler_Shell::Cleanup
  */
  void idMenuHandler_Shell::Cleanup()
  {
@@ -3099,7 +3111,7 @@ index 052b20c..dd482d0 100644
      idMenuHandler::Cleanup();
  
      delete introGui;
-@@ -638,12 +886,12 @@ void idMenuHandler_Shell::ActivateMenu(bool show)
+@@ -638,12 +878,12 @@ void idMenuHandler_Shell::ActivateMenu(bool show)
  enum shellCommandsPC_t {
      SHELL_CMD_DEMO0,
      SHELL_CMD_DEMO1,
@@ -3114,7 +3126,7 @@ index 052b20c..dd482d0 100644
  };
  
  /*
-@@ -698,29 +946,24 @@ void idMenuHandler_Shell::SetupPCOptions()
+@@ -698,29 +938,24 @@ void idMenuHandler_Shell::SetupPCOptions()
              if (buttonWidget != NULL) {
                  buttonWidget->ClearEventActions();
                  buttonWidget->AddEventAction(WIDGET_EVENT_PRESS).Set(WIDGET_ACTION_COMMAND, SHELL_CMD_QUIT, index);
@@ -3152,7 +3164,7 @@ index 052b20c..dd482d0 100644
              buttonWidget = dynamic_cast<idMenuWidget_MenuButton*>(&menuBar->GetChildByIndex(index));
              if (buttonWidget != NULL) {
                  buttonWidget->ClearEventActions();
-@@ -746,14 +989,29 @@ void idMenuHandler_Shell::SetupPCOptions()
+@@ -746,14 +981,29 @@ void idMenuHandler_Shell::SetupPCOptions()
              if (buttonWidget != NULL) {
                  buttonWidget->ClearEventActions();
                  buttonWidget->AddEventAction(WIDGET_EVENT_PRESS).Set(WIDGET_ACTION_COMMAND, SHELL_CMD_CREDITS, index);
@@ -3183,7 +3195,7 @@ index 052b20c..dd482d0 100644
              }
          }
      }
-@@ -862,7 +1120,14 @@ bool idMenuHandler_Shell::HandleAction(idWidgetAction& action, const idWidgetEve
+@@ -862,7 +1112,14 @@ bool idMenuHandler_Shell::HandleAction(idWidgetAction& action, const idWidgetEve
          if ((activeScreen == SHELL_AREA_GAME_LOBBY || activeScreen == SHELL_AREA_MATCH_SETTINGS) && cmd != SHELL_CMD_QUIT && cmd != SHELL_CMD_MULTIPLAYER) {
              session->Cancel();
              session->Cancel();
@@ -3199,7 +3211,7 @@ index 052b20c..dd482d0 100644
              session->Cancel();
          }
  
-@@ -889,20 +1154,20 @@ bool idMenuHandler_Shell::HandleAction(idWidgetAction& action, const idWidgetEve
+@@ -889,20 +1146,20 @@ bool idMenuHandler_Shell::HandleAction(idWidgetAction& action, const idWidgetEve
              cmdSystem->AppendCommandText(va("devmap %s %d\n", "game/le_hell", 2));
              break;
          }
@@ -3225,7 +3237,7 @@ index 052b20c..dd482d0 100644
              break;
          }
          case SHELL_CMD_SETTINGS: {
-@@ -915,6 +1180,13 @@ bool idMenuHandler_Shell::HandleAction(idWidgetAction& action, const idWidgetEve
+@@ -915,6 +1172,13 @@ bool idMenuHandler_Shell::HandleAction(idWidgetAction& action, const idWidgetEve
              transition = MENU_TRANSITION_SIMPLE;
              break;
          }
@@ -3239,7 +3251,7 @@ index 052b20c..dd482d0 100644
          case SHELL_CMD_QUIT: {
              HandleExitGameBtn();
              break;
-@@ -1063,12 +1335,12 @@ void idMenuHandler_Shell::UpdateBGState()
+@@ -1063,12 +1327,12 @@ void idMenuHandler_Shell::UpdateBGState()
  
      if (smallFrameShowing) {
          if (nextScreen != SHELL_AREA_PLAYSTATION && nextScreen != SHELL_AREA_SETTINGS && nextScreen != SHELL_AREA_CAMPAIGN && nextScreen != SHELL_AREA_DEV) {
@@ -3254,7 +3266,7 @@ index 052b20c..dd482d0 100644
              ShowSmallFrame(true);
          }
      }
-@@ -1178,6 +1450,31 @@ idMenuHandler_Shell::StartGame
+@@ -1178,6 +1442,31 @@ idMenuHandler_Shell::StartGame
  */
  void idMenuHandler_Shell::StartGame(int index)
  {
@@ -3286,13 +3298,10 @@ index 052b20c..dd482d0 100644
      if (index == 0) {
          cmdSystem->AppendCommandText(va("map %s %d\n", "game/mars_city1", 0));
      } else if (index == 1) {
-@@ -1195,10 +1492,20 @@ idMenuHandler_Shell::ShowIntroVideo
+@@ -1195,10 +1484,17 @@ idMenuHandler_Shell::ShowIntroVideo
  */
  void idMenuHandler_Shell::ShowDoomIntro()
  {
-+#ifdef __EMSCRIPTEN__
-+    if (BrowserBridge_GetNumber("skipIntro", 1)) { webIntroAutoStartAt = 0; StartGame(0); return; }
-+#endif
 +#if defined(__EMSCRIPTEN__)
 +    webCoopIntroHandoff = false;
 +    webIntroPendingGame = -1;
@@ -3302,54 +3311,58 @@ index 052b20c..dd482d0 100644
  
      showingIntro = true;
 +#ifdef __EMSCRIPTEN__
-+    webIntroAutoStartAt = BrowserBridge_GetNumber("skipIntro", 1) ? Sys_Milliseconds() + 700 : 0;
++    webIntroAutoStartAt = 0; // Skip mode controls a player's skip action, not automatic intro omission.
 +#endif
  
      delete introGui;
      introGui = new idSWF("doomIntro", common->MenuSW());
-@@ -1357,10 +1664,16 @@ idMenuHandler_Shell::ShowROEIntro
- */
- void idMenuHandler_Shell::ShowROEIntro()
- {
-+#ifdef __EMSCRIPTEN__
-+    if (BrowserBridge_GetNumber("skipIntro", 1)) { webIntroAutoStartAt = 0; StartGame(1); return; }
-+#endif
- 
+@@ -1361,6 +1657,9 @@ void idMenuHandler_Shell::ShowROEIntro()
      StopSound();
  
      showingIntro = true;
 +#ifdef __EMSCRIPTEN__
-+    webIntroAutoStartAt = BrowserBridge_GetNumber("skipIntro", 1) ? Sys_Milliseconds() + 700 : 0;
++    webIntroAutoStartAt = 0;
 +#endif
  
      delete introGui;
      introGui = new idSWF("roeIntro", common->MenuSW());
-@@ -1510,10 +1823,16 @@ idMenuHandler_Shell::ShowLEIntro
- */
- void idMenuHandler_Shell::ShowLEIntro()
- {
-+#ifdef __EMSCRIPTEN__
-+    if (BrowserBridge_GetNumber("skipIntro", 1)) { webIntroAutoStartAt = 0; StartGame(2); return; }
-+#endif
- 
+@@ -1514,6 +1813,9 @@ void idMenuHandler_Shell::ShowLEIntro()
      StopSound();
  
      showingIntro = true;
 +#ifdef __EMSCRIPTEN__
-+    webIntroAutoStartAt = BrowserBridge_GetNumber("skipIntro", 1) ? Sys_Milliseconds() + 700 : 0;
++    webIntroAutoStartAt = 0;
 +#endif
  
      delete introGui;
      introGui = new idSWF("leIntro", common->MenuSW());
-@@ -1592,4 +1911,4 @@ void idMenuHandler_Shell::ShowLEIntro()
+@@ -1592,4 +1894,4 @@ void idMenuHandler_Shell::ShowLEIntro()
              infoSprite->GetScriptObject()->Set("onEnterFrame", new idIntroTextUpdate(txtVal, this));
          }
      }
 -}
 \ No newline at end of file
 +}
+diff --git a/neo/d3xp/menus/MenuScreen.cpp b/neo/d3xp/menus/MenuScreen.cpp
+index 93c3fbf..98d04a2 100644
+--- a/neo/d3xp/menus/MenuScreen.cpp
++++ b/neo/d3xp/menus/MenuScreen.cpp
+@@ -291,6 +291,13 @@ void idMenuScreen::ShowScreen(const mainMenuTransition_t transitionType)
+     }
+ 
+     GetSprite()->SetVisible(true);
++#ifdef __EMSCRIPTEN__
++    // Shared authored sprites can have been faded out by another browser page.
++    if (GetSprite()->GetScriptObject()->Get("_webFadeStart").IsNumeric()) {
++        GetSprite()->GetScriptObject()->Set("_webFadeStart", Sys_Milliseconds());
++        GetSprite()->GetScriptObject()->Set("_webFadeOut", false);
++    }
++#endif
+     if (transitionType == MENU_TRANSITION_SIMPLE) {
+         if (menuData != NULL && menuData->ActiveScreen() != -1) {
+             menuData->PlaySound(GUI_SOUND_BUILD_ON);
 diff --git a/neo/d3xp/menus/MenuScreen.h b/neo/d3xp/menus/MenuScreen.h
-index 30b1999..68bc7e5 100644
+index 30b1999..43e51b4 100644
 --- a/neo/d3xp/menus/MenuScreen.h
 +++ b/neo/d3xp/menus/MenuScreen.h
 @@ -695,6 +695,119 @@ private:
@@ -3495,7 +3508,7 @@ index 30b1999..68bc7e5 100644
      {
      }
      virtual void Initialize(idMenuHandler* data);
-@@ -1372,6 +1492,121 @@ private:
+@@ -1372,6 +1492,122 @@ private:
      idMenuWidget_DynamicList* options;
      idMenuDataSource_SystemSettings systemData;
      idMenuWidget_Button* btnBack;
@@ -3551,6 +3564,7 @@ index 30b1999..68bc7e5 100644
 +        enum audioSettingFields_t {
 +            AUDIO_FIELD_MUSIC_VOLUME,
 +            AUDIO_FIELD_GAME_VOLUME,
++            AUDIO_FIELD_PAUSE_UNFOCUSED,
 +            MAX_AUDIO_FIELDS
 +        };
 +
@@ -3617,7 +3631,7 @@ index 30b1999..68bc7e5 100644
  };
  
  //*
-@@ -1574,6 +1809,11 @@ public:
+@@ -1574,6 +1810,11 @@ public:
          , newVideoHeading(NULL)
          , mpMessage(NULL)
          , mpTime(NULL)
@@ -3629,7 +3643,7 @@ index 30b1999..68bc7e5 100644
          , audioLogPrevTime(0)
          , commPrevTime(0)
          , oxygenComm(false)
-@@ -1639,6 +1879,7 @@ public:
+@@ -1639,6 +1880,7 @@ public:
      void ToggleLagged(bool show);
      void UpdateGameTime(const char* time);
      void UpdateMessage(bool show, const idStr& message);
@@ -3637,7 +3651,7 @@ index 30b1999..68bc7e5 100644
      void ShowNewItem(const char* name, const char* icon);
      void UpdateFlashlight(idPlayer* player);
      void UpdateChattingHud(idPlayer* player);
-@@ -1695,6 +1936,14 @@ private:
+@@ -1695,6 +1937,14 @@ private:
      idSWFTextInstance* mpMessage;
      idSWFTextInstance* mpTime;
  
@@ -7751,7 +7765,7 @@ index 4e23bb7..9c4b739 100644
      return true;
  }
 diff --git a/neo/framework/Licensee.h b/neo/framework/Licensee.h
-index ef6b07e..b9f2c2d 100644
+index ef6b07e..cb8fbc2 100644
 --- a/neo/framework/Licensee.h
 +++ b/neo/framework/Licensee.h
 @@ -49,7 +49,13 @@ If you have questions concerning this license or the applicable additional terms
@@ -7761,7 +7775,7 @@ index ef6b07e..b9f2c2d 100644
 +#ifdef __EMSCRIPTEN__
 +// Browser co-op snapshots now include life counts. Never decode them with an
 +// older engine's player snapshot layout.
-+#define ASYNC_PROTOCOL_MAJOR 5
++#define ASYNC_PROTOCOL_MAJOR 6
 +#else
  #define ASYNC_PROTOCOL_MAJOR 1
 +#endif
@@ -12032,7 +12046,7 @@ index 6a6e668..c6afe62 100644
      bool InhibitControl();
      void ForceInhibitControl(bool val)
 diff --git a/neo/swf/SWF_Render.cpp b/neo/swf/SWF_Render.cpp
-index 10626b8..9218946 100644
+index 10626b8..0f3dde5 100644
 --- a/neo/swf/SWF_Render.cpp
 +++ b/neo/swf/SWF_Render.cpp
 @@ -40,6 +40,84 @@ extern idCVar swf_textStrokeSize;
@@ -12227,7 +12241,29 @@ index 10626b8..9218946 100644
  /*
  ========================
  idSWF::RenderMask
-@@ -708,6 +879,16 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
+@@ -261,6 +432,21 @@ void idSWF::RenderSprite(idRenderSystem* gui, idSWFSpriteInstance* spriteInstanc
+         float yOffset = 0.0f;
+ 
+         if (entry->type == SWF_DICT_SPRITE) {
++#ifdef __EMSCRIPTEN__
++            // Apply menu fades AFTER authored timeline/colour evaluation.
++            // Updating sprite alpha in menu Update() is otherwise overwritten
++            // by the next rollOn frame before any pixels are drawn.
++            idSWFScriptObject* menuState = display.spriteInstance->GetScriptObject();
++            const idSWFScriptVar fadeStart = menuState->Get("_webFadeStart");
++            if (fadeStart.IsNumeric()) {
++                const idSWFScriptVar duration = menuState->Get("_webFadeDuration");
++                const float elapsed = (Sys_Milliseconds() - fadeStart.ToInteger()) / (float)Max(1, duration.IsNumeric() ? duration.ToInteger() : 160);
++                const float progress = idMath::ClampFloat(0.0f, 1.0f, elapsed);
++                const float alpha = menuState->Get("_webFadeOut").ToBool() ? 1.0f - progress : progress;
++                renderState2.cxf.mul.w *= alpha;
++                renderState2.cxf.add.w *= alpha;
++            }
++#endif
+             display.spriteInstance->SetAlignment(spriteInstance->xOffset, spriteInstance->yOffset);
+ 
+             if (display.spriteInstance->name[0] == '_') {
+@@ -708,6 +894,16 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
  
      idStr text;
  
@@ -12244,7 +12280,7 @@ index 10626b8..9218946 100644
      if (textInstance->variable.IsEmpty()) {
          if (textInstance->renderMode == SWF_TEXT_RENDER_PARAGRAPH) {
              if (textInstance->NeedsGenerateRandomText()) {
-@@ -731,6 +912,9 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
+@@ -731,6 +927,9 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
          }
      }
  
@@ -12254,7 +12290,7 @@ index 10626b8..9218946 100644
      if (text.Length() == 0) {
          textInstance->selectionEnd = -1;
          textInstance->selectionStart = -1;
-@@ -798,16 +982,65 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
+@@ -798,16 +997,65 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
      float postTransformHeight = SWFTWIP(shape->fontHeight) * yScale;
  
      const idFont* fontInfo = swfFont->fontID;
@@ -12320,7 +12356,7 @@ index 10626b8..9218946 100644
      if (defaultColor.w <= ALPHA_EPSILON) {
          return;
      }
-@@ -1453,6 +1686,11 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
+@@ -1453,6 +1701,11 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
              }
  
              DrawStretchPic(idVec4(topl.x, topl.y, s1, t1), idVec4(topr.x, topr.y, s2, t1), idVec4(br.x, br.y, s2, t2), idVec4(bl.x, bl.y, s1, t2), glyph.material);
@@ -12332,7 +12368,7 @@ index 10626b8..9218946 100644
              x += glyphSkip;
              x += extraSpace;
              if (cursorPos == c) {
-@@ -1465,6 +1703,21 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
+@@ -1465,6 +1718,21 @@ void idSWF::RenderEditText(idRenderSystem* gui, idSWFTextInstance* textInstance,
  
          index++;
      }
@@ -15085,7 +15121,7 @@ diff --git a/neo/d3xp/menus/MenuScreen_Shell_BrowserBridge.h b/neo/d3xp/menus/Me
 new file mode 100644
 --- /dev/null
 +++ b/neo/d3xp/menus/MenuScreen_Shell_BrowserBridge.h
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,154 @@
 +#ifndef __MENUSCREEN_SHELL_BROWSERBRIDGE_H__
 +#define __MENUSCREEN_SHELL_BROWSERBRIDGE_H__
 +
@@ -15101,7 +15137,14 @@ new file mode 100644
 +    idSWFScriptObject* state = sprite->GetScriptObject();
 +    const idSWFScriptVar previous = state->Get(key);
 +    state->Set(key, page);
-+    if (reset || previous.IsUndefined() || previous.ToInteger() == page) return;
++    if (reset) {
++        state->Set("_webFadeStart", Sys_Milliseconds());
++        state->Set("_webFadeOut", false);
++        state->Set("_webFadeDuration", 160);
++        return; // The base ShowScreen already plays the authored entrance/sound.
++    }
++    if (previous.IsUndefined() || previous.ToInteger() == page) return;
++    state->Set("_webFadeOut", false);
 +    sprite->SetVisible(true);
 +    if (data) data->PlaySound(GUI_SOUND_BUILD_ON);
 +    // The panel is already open when navigating between browser subpages.
@@ -15120,9 +15163,9 @@ new file mode 100644
 +    idSWFScriptObject* state = sprite->GetScriptObject();
 +    const idSWFScriptVar started = state->Get("_webFadeStart");
 +    if (started.IsUndefined()) return;
-+    const float alpha = idMath::ClampFloat(0.0f, 1.0f, (Sys_Milliseconds() - started.ToInteger()) / 160.0f);
-+    idSWFSpriteInstance* list = state->GetNestedSprite("info", "options");
-+    if (list) list->SetAlpha(alpha);
++    // SWF timelines overwrite alpha during Render(), after menu Update().
++    // The renderer applies this duration to its final render colour instead.
++    state->Set("_webFadeDuration", 160);
 +}
 +
 +static void BrowserBridge_RefreshSnapshot()
@@ -15237,7 +15280,7 @@ diff --git a/neo/d3xp/menus/MenuScreen_Shell_WebMultiplayer.cpp b/neo/d3xp/menus
 new file mode 100644
 --- /dev/null
 +++ b/neo/d3xp/menus/MenuScreen_Shell_WebMultiplayer.cpp
-@@ -0,0 +1,989 @@
+@@ -0,0 +1,993 @@
 +#pragma hdrstop
 +#include "precompiled.h"
 +#include "../Game_local.h"
@@ -15805,6 +15848,10 @@ new file mode 100644
 +    multiplayerEditConsumedKeys.Clear();
 +    pageFadePhase = 0;
 +    if (GetSprite()) GetSprite()->SetAlpha(1.0f);
++    if (GetSprite()) {
++        GetSprite()->GetScriptObject()->Set("_webFadeStart", Sys_Milliseconds());
++        GetSprite()->GetScriptObject()->Set("_webFadeOut", true);
++    }
 +    // The authored settings sprite is shared with other native pages.
 +    if (options && options->GetSprite()) {
 +        idSWFScriptVar original = options->GetSprite()->GetScriptObject()->Get("_webOptionsX");
@@ -16231,7 +16278,7 @@ diff --git a/neo/d3xp/menus/MenuScreen_Shell_WebSettings.cpp b/neo/d3xp/menus/Me
 new file mode 100644
 --- /dev/null
 +++ b/neo/d3xp/menus/MenuScreen_Shell_WebSettings.cpp
-@@ -0,0 +1,490 @@
+@@ -0,0 +1,494 @@
 +// Browser settings use the game's original SWF controls and command bar.
 +#pragma hdrstop
 +#include "precompiled.h"
@@ -16383,12 +16430,14 @@ new file mode 100644
 +        row("Music volume", &audioData, idMenuDataSource_AudioSettings::AUDIO_FIELD_MUSIC_VOLUME, 200, true);
 +        row("Game and dialogue", &audioData, idMenuDataSource_AudioSettings::AUDIO_FIELD_GAME_VOLUME, 201, true);
 +        resolutionControl = row("Output device", &browserData, B::BROWSER_FIELD_AUDIO_OUTPUT, 100);
++        row("Pause audio when unfocused", &audioData, idMenuDataSource_AudioSettings::AUDIO_FIELD_PAUSE_UNFOCUSED, 202)
++            ->SetDescription("Pause sound while this browser window or tab is not focused. Enabled by default; applies immediately.");
 +    } else if (page == PAGE_BROWSER) {
 +        BuildBrowserRows();
 +    } else {
 +        row("FPS Counter", &engineData, E::SYSTEM_FIELD_WEB_FPS_COUNTER, E::SYSTEM_FIELD_WEB_FPS_COUNTER);
-+        row("Skip intro", &browserData, B::BROWSER_FIELD_SKIP_INTRO, 306)
-+            ->SetDescription("Skip starts the campaign right away; Fast forward plays the intro and lets you skip it.");
++        row("Cinematic skip mode", &browserData, B::BROWSER_FIELD_SKIP_INTRO, 306)
++            ->SetDescription("When you skip a scene: Skip hides accelerated frames; Fast forward shows them. Campaign intros play normally.");
 +        row("Developer levels", &browserData, B::BROWSER_FIELD_DEVELOPER_LEVELS, 104);
 +        row("Enable console", &browserData, B::BROWSER_FIELD_ENABLE_CONSOLE, 103)->SetDescription("Allow the tilde console. Off by default; restart to apply.");
 +    }
@@ -16716,9 +16765,11 @@ new file mode 100644
 +    return originalMusicVolume != cvarSystem->GetCVarFloat("s_musicVolume") || originalGameVolume != cvarSystem->GetCVarFloat("s_gameVolume");
 +}
 +idSWFScriptVar idMenuScreen_Shell_WebSettings::idMenuDataSource_AudioSettings::GetField(int field) const {
++    if (field == AUDIO_FIELD_PAUSE_UNFOCUSED) return BrowserBridge_GetNumber("pauseAudioUnfocused", 1) ? "Enabled" : "Disabled";
 +    return 100.0f * cvarSystem->GetCVarFloat(field == AUDIO_FIELD_MUSIC_VOLUME ? "s_musicVolume" : "s_gameVolume");
 +}
 +void idMenuScreen_Shell_WebSettings::idMenuDataSource_AudioSettings::AdjustField(int field, int amount) {
++    if (field == AUDIO_FIELD_PAUSE_UNFOCUSED) { BrowserBridge_SetNumber("pauseAudioUnfocused", BrowserBridge_GetNumber("pauseAudioUnfocused", 1) ? 0 : 1); return; }
 +    const char* key = field == AUDIO_FIELD_MUSIC_VOLUME ? "s_musicVolume" : "s_gameVolume";
 +    cvarSystem->SetCVarFloat(key, idMath::ClampFloat(0.0f, 1.0f, cvarSystem->GetCVarFloat(key) + amount * 0.01f));
 +}

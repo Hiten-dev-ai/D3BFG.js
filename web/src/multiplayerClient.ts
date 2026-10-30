@@ -449,7 +449,7 @@ export class MultiplayerClient {
         this.pendingPeerId = message.peerId;
         this.lastOperation = 'transport';
         try {
-          this.socket?.send(JSON.stringify({ type: 'transport', version: 2, gameProtocol: 5 }));
+          this.socket?.send(JSON.stringify({ type: 'transport', version: 2, gameProtocol: 6 }));
         } catch {
           this.completeConnect(1);
         }

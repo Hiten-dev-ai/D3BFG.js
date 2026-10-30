@@ -24,6 +24,7 @@ export function readServerConfig(env = process.env) {
     saves: resolve(env.DOOM3BFG_SYNC_DIR, 'data/saves'),
     game: resolve(env.DOOM3BFG_GAME_DIR, 'game'),
     multiplayer: bool('MULTIPLAYER_ENABLED', true),
+    offlinePlaybackAllowed: bool('OFFLINE_PLAYBACK_ALLOWED', true),
     sharedAssetCache: bool('SHARED_ASSET_CACHE', true),
     browserDefaults: {
       cacheMode: integer('BROWSER_CACHE_MODE', 1, 0, 3),
@@ -32,6 +33,7 @@ export function readServerConfig(env = process.env) {
       developerMenu: Number(bool('BROWSER_DEVELOPER_LEVELS', false)),
       enableConsole: Number(bool('BROWSER_ENABLE_CONSOLE', false)),
       skipIntro: Number(bool('BROWSER_SKIP_CINEMATICS', true)),
+      pauseAudioUnfocused: Number(bool('BROWSER_PAUSE_AUDIO_UNFOCUSED', true)),
       aspect: 0, resolutionIndex: 0, audioOutput: 0,
       frameRateCap: integer('BROWSER_FRAME_RATE_CAP', 60, 60, 360),
     },

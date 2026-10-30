@@ -1,8 +1,10 @@
 import { clearAssetCache } from './assetPolicy';
+import { createFocusAudioPolicy } from './focusAudio';
+import { setOfflinePlaybackAllowed } from './offlinePolicy';
 import { MENU_STATE_WORDS, publishBrowserMenuState } from './browserMenuState';
 import { MultiplayerClient } from './multiplayerClient';
 import { createNativeMultiplayerBridge } from './nativeMultiplayer';
-import { announceReconnected, dismissNativeNotice, nativeNoticeCount, peekNativeNotice, queueNativeNotice } from './nativeNotices';
+import { announceReconnected, dismissNativeNotice, nativeNoticeCount, nativeNoticeMainMenuOnly, peekNativeNotice, queueNativeNotice } from './nativeNotices';
 import { setSaveSyncEnabled } from './saveSync';
 import { getCurrentAccount, setCurrentAccount, logoutAccount, openProfile, openDeleteAccount } from './privateAccess';
 
@@ -17,12 +19,13 @@ export interface BrowserPreferences {
   audioOutput: number;
   frameRateCap: number;
   skipIntro: number;
+  pauseAudioUnfocused: number;
 }
 
 const preferenceKey = 'doom3-browser-preferences-v1';
 const defaults: BrowserPreferences = {
   cacheMode: 1, persistSaves: 1, browserSync: 0, developerMenu: 0, enableConsole: 0,
-  aspect: 0, resolutionIndex: 0, audioOutput: 0, frameRateCap: 60, skipIntro: 1,
+  aspect: 0, resolutionIndex: 0, audioOutput: 0, frameRateCap: 60, skipIntro: 1, pauseAudioUnfocused: 1,
 };
 export const browserPreferences: BrowserPreferences = { ...defaults };
 let multiplayerEnabled = true;
@@ -37,6 +40,8 @@ export async function applyServerBrowserDefaults(): Promise<void> {
       if (!Number.isSafeInteger(saved[key]) && Number.isSafeInteger(config.browserDefaults?.[key])) browserPreferences[key] = config.browserDefaults[key];
     }
     multiplayerEnabled = config.multiplayer !== false;
+    setOfflinePlaybackAllowed(config.offlinePlaybackAllowed !== false);
+    focusAudio.sync();
     notifySettingsChanged();
   } catch { /* Optional defaults must not prevent cached/offline play. */ }
 }
@@ -49,13 +54,15 @@ try {
 } catch { /* Storage preferences are optional. */ }
 browserPreferences.cacheMode = Math.max(0, Math.min(3, browserPreferences.cacheMode));
 browserPreferences.aspect = Math.max(0, Math.min(4, browserPreferences.aspect));
-for (const key of ['persistSaves', 'browserSync', 'developerMenu', 'enableConsole', 'skipIntro'] as const) {
+for (const key of ['persistSaves', 'browserSync', 'developerMenu', 'enableConsole', 'skipIntro', 'pauseAudioUnfocused'] as const) {
   browserPreferences[key] = browserPreferences[key] ? 1 : 0;
 }
 
 try { localStorage.removeItem('doom3-last-session-v1'); } catch { /* Obsolete resume hint. */ }
 
 const audioContexts = new Set<AudioContext & { setSinkId?: (id: string) => Promise<void> }>();
+const focusAudio = createFocusAudioPolicy(() => browserPreferences.pauseAudioUnfocused === 1,
+  () => !document.hidden && (typeof document.hasFocus !== 'function' || document.hasFocus()));
 let audioDevices: { deviceId: string; label: string }[] = [{ deviceId: 'default', label: 'System default' }];
 let storageBytes = 0;
 let statusMessage = '';
@@ -448,6 +455,7 @@ export async function applyPendingAssetClear(): Promise<void> {
 
 const bridge = {
   getNumber(key: string): number {
+    if (key === 'nativeNoticeMainMenuOnly') return nativeNoticeMainMenuOnly();
     if (key === 'accountBusy') return accountBusy ? 1 : 0;
     if (key === 'nativeNoticeCount') return nativeNoticeCount();
     if (key === 'offline') return navigator.onLine === false ? 1 : 0;
@@ -498,7 +506,7 @@ const bridge = {
   setNumber(key: string, value: number): void {
     if (!Number.isSafeInteger(value)) return;
     const ranges: Record<string, [number, number]> = {
-      cacheMode: [0, 3], persistSaves: [0, 1], developerMenu: [0, 1], enableConsole: [0, 1], skipIntro: [0, 1],
+      cacheMode: [0, 3], persistSaves: [0, 1], developerMenu: [0, 1], enableConsole: [0, 1], skipIntro: [0, 1], pauseAudioUnfocused: [0, 1],
       aspect: [0, 4], resolutionIndex: [0, resolutionModes().length - 1],
       frameRateCap: [60, 360],
     };
@@ -508,6 +516,7 @@ const bridge = {
     if (!range) return;
     if (key === 'frameRateCap' && !frameRates().includes(value)) return;
     browserPreferences[key as keyof BrowserPreferences] = Math.max(range[0], Math.min(range[1], value));
+    if (key === 'pauseAudioUnfocused') focusAudio.sync();
     if (key === 'browserSync') {
       if (value) browserPreferences.persistSaves = 1;
       // Restoration happens before the engine mounts IDBFS, never over its live FS.
@@ -578,6 +587,7 @@ document.addEventListener('doom3-audio-context', (event) => {
   const context = (event as CustomEvent<{ context: AudioContext }>).detail?.context;
   if (context) {
     audioContexts.add(context);
+    focusAudio.register(context);
     if (selectedAudioDeviceId) {
       void refreshAudioDevices().then(() => {
         const index = audioDevices.findIndex(device => device.deviceId === selectedAudioDeviceId);
@@ -600,6 +610,9 @@ document.addEventListener('doom3-single-player', () => multiplayer.disconnect())
 document.addEventListener('doom3-engine-stopped', () => multiplayer.disconnect());
 window.addEventListener('resize', () => { publishDisplaySize(); notifySettingsChanged(); probeDisplayRefresh(); });
 window.addEventListener('focus', publishDisplaySize);
+window.addEventListener('focus', () => focusAudio.sync());
+window.addEventListener('blur', () => focusAudio.sync());
+window.addEventListener('pointerdown', () => focusAudio.sync());
 window.addEventListener('keydown', (event) => {
   if (event.key === 'F11') {
     document.documentElement.dataset.doom3DisplayTransition = '1';
@@ -613,7 +626,7 @@ window.addEventListener('keydown', (event) => {
 document.addEventListener('fullscreenchange', () => { publishDisplaySize(); notifySettingsChanged(); probeDisplayRefresh(); updateFullscreenGate(); });
 window.addEventListener('resize', updateFullscreenGate);
 document.addEventListener('doom3-account-changed', notifySettingsChanged);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) probeDisplayRefresh(); });
+document.addEventListener('visibilitychange', () => { focusAudio.sync(); if (!document.hidden) probeDisplayRefresh(); });
 navigator.mediaDevices?.addEventListener('devicechange', () => { void refreshAudioDevices(); });
 let monitorProbeTimer: number | undefined;
 let lastScreen = `${screen.width}:${screen.height}:${devicePixelRatio}`;

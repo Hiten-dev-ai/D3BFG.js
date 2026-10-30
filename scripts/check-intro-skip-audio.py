@@ -16,34 +16,24 @@ def block(source, signature):
         end += 1
     return source[start:end]
 
-functions = ''
 for name in ['ShowDoomIntro', 'ShowROEIntro', 'ShowLEIntro']:
     function = block(shell, f'void idMenuHandler_Shell::{name}(')
-    opening = function.index('{')
-    # Compile the actual early bypass; the sentinel represents movie creation.
-    early = function[opening + 1:function.index('#endif', opening)] + '#endif\n'
-    assert function.index('StartGame(') < function.index('new idSWF(')
-    functions += f'void {name}() {{ {early} ++movies; }}\n'
+    assert 'new idSWF(' in function
+    assert 'BrowserBridge_GetNumber("skipIntro"' not in function, 'skip-action mode must not bypass campaign intro playback'
+    assert 'webIntroAutoStartAt = 0;' in function
 
 fixture = r'''
 #include <cassert>
 #include <vector>
 #define __EMSCRIPTEN__
-bool skip=true; int movies=0, webIntroAutoStartAt=123;
-std::vector<int> starts;
-int BrowserBridge_GetNumber(const char*, int) { return skip ? 1 : 0; }
-void StartGame(int index) { starts.push_back(index); }
 enum { SND_CHANNEL_VOICE=1, SND_CHANNEL_VOICE2=2 };
 struct idEntity {
  struct Node { idEntity* next=nullptr; idEntity* Next() { return next; } } spawnNode;
  int voices=0, voices2=0;
  void StopSound(int channel,bool network) { assert(!network); if(channel==1) ++voices; else if(channel==2) ++voices2; else assert(false); }
 };
-''' + functions + block(game, 'static void StopSkippedCinematicVoices(') + r'''
+''' + block(game, 'static void StopSkippedCinematicVoices(') + r'''
 int main() {
- ShowDoomIntro(); ShowROEIntro(); ShowLEIntro();
- assert(movies==0 && webIntroAutoStartAt==0 && starts.size()==3 && starts[0]==0 && starts[1]==1 && starts[2]==2);
- skip=false; ShowDoomIntro(); ShowROEIntro(); ShowLEIntro(); assert(movies==3 && starts.size()==3);
  idEntity one,two; one.spawnNode.next=&two; StopSkippedCinematicVoices(&one);
  assert(one.voices==1 && one.voices2==1 && two.voices==1 && two.voices2==1);
 }
@@ -57,4 +47,4 @@ with tempfile.TemporaryDirectory(prefix='doom-intro-skip-audio-') as folder:
     cpp.write_text(fixture)
     subprocess.run([compiler, '-std=c++17', str(cpp), '-o', str(exe)], check=True, timeout=60)
     subprocess.run([str(exe)], check=True, timeout=20)
-print('Actual intro bypass skips movie creation for all campaigns; non-Skip path retained; skipped voice-channel cleanup runs without stopping ambient channels.')
+print('All campaign intros retain their movie SWF without skip-mode bypass/auto-start; actual skipped voice-channel cleanup preserves ambient channels.')

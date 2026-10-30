@@ -7,8 +7,9 @@ import tarfile
 import zipfile
 
 root = Path(__file__).resolve().parents[1] / 'dist/releases'
-files = ['d3bfg-js-0.2.0-win-x64.zip', 'd3bfg-js-0.2.0-win-arm64.zip',
-         'd3bfg-js-0.2.0-linux-x64.tar.gz', 'd3bfg-js_0.2.0_amd64.deb', 'd3bfg-js-0.2.0-source.tar.gz']
+version = json.loads((root.parents[1] / 'web/package.json').read_text())['version']
+files = [f'd3bfg-js-{version}-win-x64.zip', f'd3bfg-js-{version}-win-arm64.zip',
+         f'd3bfg-js-{version}-linux-x64.tar.gz', f'd3bfg-js_{version}_amd64.deb', f'd3bfg-js-{version}-source.tar.gz']
 if not all((root / name).is_file() for name in files):
     print('SKIP release archive checks: build all server packages and export source first.'); raise SystemExit(0)
 denied = {'.resources', '.bimage', '.bik', '.roq', '.pk4', '.wad', '.save', '.dds', '.tga'}
@@ -21,7 +22,8 @@ def check_names(names, binary=True):
         assert path.suffix.lower() not in denied, name
         assert path.name not in {'.env', 'accounts.json', 'snapshot.json'}, name
         assert not any(part in {'.git', '.runtime-trace', 'DOOM 3 BFG Edition'} for part in path.parts), name
-        if binary: assert path.suffix.lower() not in {'.png', '.jpg', '.map', '.proc', '.cm'}, name
+        if binary and path.suffix.lower() == '.png': assert path.name in {'app-icon-32.png', 'app-icon-192.png', 'app-icon-512.png'}, name
+        if binary: assert path.suffix.lower() not in {'.jpg', '.map', '.proc', '.cm'}, name
 
 def check_worker(names, read):
     manifest_name = next(name for name in names if name.endswith('/dist/site/engine-worker/build-info.json'))
@@ -34,6 +36,14 @@ def check_worker(names, read):
     assert any(name.endswith('/web/node_modules/ws/LICENSE') for name in names)
     assert any(name.endswith('/COPYING.txt') for name in names)
     assert any(name.endswith('/fonts/OFL.txt') for name in names)
+    # Offline installer must never reference missing files (older packages
+    # shipped an SW manifest that still referenced removed launcher artwork).
+    import re
+    site = manifest_name.split('/engine-worker/')[0]
+    worker = read(site + '/offline-sw.js').decode()
+    shell_files = json.loads(re.search(r'const SHELL_FILES = (\[.*?\]);', worker).group(1))
+    for path in shell_files:
+        assert site + ('/index.html' if path == '/' else path) in names, path
 
 for name in files:
     file = root / name

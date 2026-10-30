@@ -317,8 +317,8 @@ export function attachMultiplayerServer(httpServer, { authorize = () => true, id
     }
     switch (request.type) {
       case 'transport':
-        if (request.gameProtocol !== undefined && request.gameProtocol !== 5) peer.protocolRejected = true;
-        if (request.version !== 2 || ![undefined, 5].includes(request.gameProtocol) ||
+        if (request.gameProtocol !== undefined && request.gameProtocol !== 6) peer.protocolRejected = true;
+        if (request.version !== 2 || ![undefined, 6].includes(request.gameProtocol) ||
             (peer.lobbyId && peer.gameProtocol !== (request.gameProtocol ?? 0))) {
           sendError(peer, 'BAD_REQUEST');
           break;

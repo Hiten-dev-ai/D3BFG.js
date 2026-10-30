@@ -2,7 +2,7 @@
 // A seqlock snapshot is published by the DOM thread; workers keep the previous
 // complete snapshot if a publication happens concurrently.
 export const MENU_STATE_WORDS = 12 + 65536 / 4;
-const numberKeys = ('accountBusy aspect audioOutput audioOutputCount audioOutputSupported audioSplitSupported browserSync cacheMode developerMenu enableConsole frameRateCap frameRateCount fullscreen mpCanReconnect mpCoopCampaignPicker mpCoopConnecting mpCoopDevPicker mpCoopSavePicker mpErrorCode mpHostLoading mpHostPeerId mpInRoom mpIsHost mpLobbyCount mpPeerId mpPrivate mpRevision mpRoomKind mpRoomLives mpRoomMax mpRoomPlayers mpScanning mpStarted mpStatus nativeNoticeCount offline persistSaves resolutionCount resolutionIndex skipIntro startupFrameRateCap').split(' ');
+const numberKeys = ('accountBusy aspect audioOutput audioOutputCount audioOutputSupported audioSplitSupported browserSync cacheMode developerMenu enableConsole frameRateCap frameRateCount fullscreen mpCanReconnect mpCoopCampaignPicker mpCoopConnecting mpCoopDevPicker mpCoopSavePicker mpErrorCode mpHostLoading mpHostPeerId mpInRoom mpIsHost mpLobbyCount mpPeerId mpPrivate mpRevision mpRoomKind mpRoomLives mpRoomMax mpRoomPlayers mpScanning mpStarted mpStatus nativeNoticeCount nativeNoticeMainMenuOnly offline pauseAudioUnfocused persistSaves resolutionCount resolutionIndex skipIntro startupFrameRateCap').split(' ');
 const textKeys = ('accountStatus aspectName audioOutputName connectionStatus mpError mpErrorMessage mpPrivateCode mpReconnectName mpRoomId mpRoomKind mpRoomMap mpRoomMode mpRoomName nativeNoticeText profileEmail profileName rendererName resolutionName statusMessage storageSummary').split(' ');
 let previous = '';
 export function publishBrowserMenuState(shared: Int32Array, bridge: {

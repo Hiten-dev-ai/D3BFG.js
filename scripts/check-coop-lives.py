@@ -60,8 +60,8 @@ require("coopRespawnOriginalColor" in hud and "respawnText->color.g = 32" in hud
         "respawn warning flashes red while the local player's top HUD counter stays visible")
 require("page = PAGE_HOME;\n        coopFlow = false;\n        pendingAction = MP_PENDING_NONE;" in menu,
         "reopening multiplayer without a room resets to the first page")
-require("ASYNC_PROTOCOL_MAJOR 5" in (ENGINE / "framework/Licensee.h").read_text(encoding="utf-8") and
-        "gameProtocol: 5" in client and "[undefined, 5]" in relay,
+require("ASYNC_PROTOCOL_MAJOR 6" in (ENGINE / "framework/Licensee.h").read_text(encoding="utf-8") and
+        "gameProtocol: 6" in client and "[undefined, 6]" in relay,
         "new player snapshot layout rejects cached older browser peers")
 
 print("Co-op lives source contract passed; runtime and visual acceptance is still required.")

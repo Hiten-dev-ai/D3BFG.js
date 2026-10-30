@@ -16,7 +16,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.2.0'
+VERSION = json.loads((ROOT / 'web/package.json').read_text())['version']
 NODE = '24.18.0'
 OUT = ROOT / 'dist/releases'
 CACHE = ROOT / '.tools/release-runtime'
@@ -63,7 +63,7 @@ def payload(folder):
     ws = ROOT / 'web/node_modules/ws'
     for file in ws.rglob('*'):
         if file.is_file(): copy(file, folder / 'web/node_modules/ws' / file.relative_to(ws))
-    for name in ['index.html', 'offline-sw.js', 'brand.svg']:
+    for name in ['index.html', 'offline-sw.js', 'brand.svg', 'favicon.ico', 'app-icon-32.png', 'app-icon-192.png', 'app-icon-512.png', 'brand-banner.webp', 'brand-square.webp']:
         copy(site / name, folder / 'dist/site' / name)
     for dirname in ['assets', 'fonts']:
         for file in (site / dirname).rglob('*'):
@@ -76,7 +76,11 @@ def payload(folder):
         if file.is_file(): copy(file, folder / 'engine/chocolate-doom3-bfg/base/renderprogs' / file.relative_to(shaders))
     for name in ['README.md', 'COPYING.txt', 'THIRD_PARTY_NOTICES.md', '.env.example']:
         copy(ROOT / name, folder / name)
-    copy(ROOT / 'docs/SERVER_SETUP.md', folder / 'docs/SERVER_SETUP.md')
+    for name in ['SERVER_SETUP.md', 'CONFIGURATION.md', 'COOP_INVENTORY.md', f'RELEASE_{VERSION}.md']:
+        copy(ROOT / 'docs' / name, folder / 'docs' / name)
+    for file in (ROOT / 'docs/screenshots').glob('*.webp'):
+        copy(file, folder / 'docs/screenshots' / file.name)
+    copy(ROOT / 'web/public/brand-banner.webp', folder / 'web/public/brand-banner.webp')
     copy(ROOT / 'scripts/prepare-multiplayer-ui.py', folder / 'scripts/prepare-multiplayer-ui.py')
     copy(ROOT / 'third_party/libbinkdec/COPYING', folder / 'third_party/libbinkdec/COPYING')
     (folder / 'SOURCE.txt').write_text(f'Corresponding source: https://github.com/Hiten-dev-ai/D3BFG.js/releases/tag/v{VERSION}\nUse the source archive accompanying this release. No commercial assets included.\n')
